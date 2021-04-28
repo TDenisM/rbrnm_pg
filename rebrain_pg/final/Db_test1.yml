@@ -1,0 +1,6 @@
+- name: db maintenance
+  hosts: hap
+#  become: yes
+  tasks:
+    - name: test 1 pgbench -c 500 -j 5 -T 180
+      shell: pgbench -c 500 -j 5 -T 180 postgres://admin:admin@127.0.0.1:6432/postgres

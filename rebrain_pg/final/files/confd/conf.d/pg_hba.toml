@@ -1,0 +1,6 @@
+[template]
+src = "pg_hba.txt.tmpl"
+dest = "/etc/pgbouncer/pg_hba.txt"
+owner = "postgres"
+mode = "0644"
+keys = []

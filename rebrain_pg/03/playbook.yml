@@ -1,0 +1,220 @@
+- name: UBUNTU19
+  hosts: u20
+  become: true
+  vars:
+    - pg_ver: 13
+    - pg_superuser: root
+    - pg_db: rebrain_courses_db
+    - pg_user: rebrain_admin
+  tasks:
+    - name: Task 1 | Get pgdg.list file stat
+      stat: path=/etc/apt/sources.list.d/pgdg.list
+      register: p
+    - name: Task 1 | Create file if needed
+      file: path=/etc/apt/sources.list.d/pgdg.list state=touch owner=root group=root mode=0644
+      when: p.stat.exists is defined and not p.stat.exists
+    - name: Task 1 | Create the file repository configuration
+      ansible.builtin.lineinfile:
+        path: /etc/apt/sources.list.d/pgdg.list
+        line: 'deb http://apt.postgresql.org/pub/repos/apt {{ ansible_distribution_release }}-pgdg main'
+        state: present
+    - name: Task 1 | Import the repository signing key
+      shell: wget --quiet -O - https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo apt-key add -
+    - name: Task 1 | Update the package lists
+      apt:
+        update_cache: yes
+        name: 
+          - postgresql-{{ pg_ver }}
+          - python3-pip
+        state: present
+    - name: Task 1 | install psycopg2-binary
+      pip:
+        name: psycopg2-binary
+    - name: Task 2 | Create SUPER user
+      become_user: postgres
+      postgresql_user: 
+        name: '{{ pg_superuser }}'
+        password: ''
+        db: postgres
+        priv: ALL
+        state: present
+        role_attr_flags: SUPERUSER
+    - name: Task 3 | Create database
+      become_user: postgres
+      postgresql_db:
+        name: '{{ pg_db }}'
+        encoding: UTF-8
+        lc_collate: en_US.UTF-8
+        lc_ctype: en_US.UTF-8
+        template: template0
+    - name: Task 4&5 | Create user
+      become_user: postgres
+      postgresql_user:
+        db: '{{ pg_db }}'
+        name: '{{ pg_user }}'
+        priv: CONNECT/ALL
+        role_attr_flags: LOGIN
+    - name: trust local connections
+      lineinfile:
+        path: /etc/postgresql/{{ pg_ver }}/main/pg_hba.conf
+        regexp: 'host\s+all\s+all\s+127.0.0.1\/32'
+        line: 'host  all  all 127.0.0.1/32 trust'
+    - name: trust socket connections
+      lineinfile:
+        path: /etc/postgresql/{{ pg_ver }}/main/pg_hba.conf
+        regexp: 'local\s+all\s+all\s+peer'
+        line: 'local  all  all  trust'
+    - name: Apply pg config
+      become_user: postgres
+      postgresql_query:
+        db: postgres
+        query: select pg_reload_conf()
+    - name: Task 6 | Copy backup file to host
+      copy:
+        src: rebrain_courses_db.sql.bqp
+        dest: /tmp/
+    - name: Task 7 | Restore database
+      shell: psql -U root -d rebrain_courses_db -f /tmp/rebrain_courses_db.sql.bqp
+    - name: Tesk 8&9 | Check table users
+      postgresql_query:
+        login_user: '{{ pg_user }}'
+        login_host: localhost
+        db: '{{ pg_db }}'
+        query: select * from users
+      register: users_result
+    - debug:
+        msg: '{{ users_result.query_result }}'
+    - name: Tesk 8&9 | Check table courses
+      postgresql_query:
+        login_user: '{{ pg_user }}'
+        login_host: localhost
+        db: '{{ pg_db }}'
+        query: select * from courses
+      register: courses_result
+    - debug:
+        msg: '{{ courses_result.query_result }}'
+    - name: Tesk 8&9 | Check table users__courses
+      postgresql_query:
+        login_user: '{{ pg_user }}'
+        login_host: localhost
+        db: '{{ pg_db }}'
+        query: select * from users__courses
+      register: users__courses_result
+    - debug:
+        msg: '{{ users__courses_result.query_result }}'
+    - name: Task 10 | Window query
+      postgresql_query:
+        login_user: '{{ pg_user }}'
+        login_host: localhost
+        db: '{{ pg_db }}'
+        query: select *, sum(price) over () from courses
+      register: task10_result
+    - debug:
+        msg: '{{ task10_result.query_result }}'
+    - name: Creare dir for answers
+      file:
+        path: /tmp/answers
+        state: directory
+    - name: Check if file for task 10 exists
+      stat:
+        path: /tmp/answers/devops_old_price
+      register: task10_file
+    - name: Save task 10 result to file
+      copy:
+        content: '{{ task10_result.query_result }}'
+        dest: /tmp/answers/devops_old_price
+      changed_when: 'task10_file.stat.exists == false'
+    - name: Task 11 | Update Devops course price
+      postgresql_query:
+        login_user: '{{ pg_user }}'
+        login_host: localhost
+        db: '{{ pg_db }}'
+        query: update courses set price=100000 where coursename='Devops'
+    - name: Task 12 | Windows query
+      postgresql_query:
+        login_user: '{{ pg_user }}'
+        login_host: localhost
+        db: '{{ pg_db }}'
+        query: select *, sum(price) over () from courses
+      register: task12_result
+    - debug:
+        msg: '{{ task12_result.query_result }}'
+    - name: Check if file for task 12 exists
+      stat:
+        path: /tmp/answers/devops_new_price
+      register: task12_file
+    - name: Save task 12 result to file
+      copy:
+        content: '{{ task12_result.query_result }}'
+        dest: /tmp/answers/devops_new_price
+      changed_when: 'task12_file.stat.exists == false'
+    - name: Task 13 | Create new db
+      postgresql_table:
+        db: '{{ pg_db }}'
+        login_user: '{{ pg_user }}'
+        login_host: localhost
+        table: auditlog
+        columns:
+          - id SERIAL PRIMARY KEY NOT NULL
+          - user_id int NOT NULL
+          - creation_time timestamp NOT NULL default now()
+          - creator varchar(50) NOT NULL
+    - name: Copy SQL files
+      copy:
+        src: '{{ item }}'
+        dest: ./
+      with_fileglob: 'files/*.sql'
+    - name: Check if function exists
+      postgresql_query:
+        login_user: '{{ pg_user }}'
+        login_host: localhost
+        db: '{{ pg_db }}'
+        path_to_script: './check_function_exists.sql'
+      register: function_exists
+    - name: Create function
+      postgresql_query:
+        login_user: '{{ pg_user }}'
+        login_host: localhost
+        db: '{{ pg_db }}'
+        path_to_script: './fuc_auditlog_users_insert.sql'
+      when: 'function_exists.rowcount|int == 0'
+    - name: Chech if trigger exists
+      postgresql_query:
+        login_user: '{{ pg_user }}'
+        login_host: localhost
+        db: '{{ pg_db }}'
+        path_to_script: './check_trigger_exists.sql'
+      register: trigger_exists
+    - name: Create trigger
+      postgresql_query:
+        login_user: '{{ pg_user }}'
+        login_host: localhost
+        db: '{{ pg_db }}'
+        path_to_script: './insert_into_users_trigger.sql'
+      when: 'trigger_exists.rowcount|int == 0'
+    - name: Add users
+      postgresql_query:
+        login_user: '{{ pg_user }}'
+        login_host: localhost
+        db: '{{ pg_db }}'
+        path_to_script: './add_users.sql'
+    - name: Check if view exists
+      postgresql_query:
+        login_user: '{{ pg_user }}'
+        login_host: localhost
+        db: '{{ pg_db }}'
+        path_to_script: './check_view_exists.sql'
+      register: view_exists
+    - name: Create view
+      postgresql_query:
+        login_user: '{{ pg_user }}'
+        login_host: localhost
+        db: '{{ pg_db }}'
+        path_to_script: './create_view.sql'
+      when: 'view_exists.rowcount|int == 0'
+    - name: Make backup
+      shell: 'pg_dump -U {{ pg_user }} {{ pg_db }} > /tmp/rebrain_courses_db_task03.sql.bqp'
+    - name: Get backup file
+      fetch:
+        src: /tmp/rebrain_courses_db_task03.sql.bqp
+        dest: ./

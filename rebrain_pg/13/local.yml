@@ -1,0 +1,8 @@
+- name: Part 1 | ETCD
+  hosts: hap
+  become: yes
+  vars:
+    eth: eth1
+  tasks:
+    - debug:
+        msg: '{{ "ansible_" + vars["eth"] }}'

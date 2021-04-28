@@ -1,0 +1,170 @@
+- name: UBUNTU19
+  hosts: u20
+  become: true
+  vars:
+    - pg_ver: 13
+    - pg_superuser: root
+    - pg_db: rebrain_courses_db
+    - pg_user: rebrain_admin
+  tasks:
+    - name: Task 1 | Get pgdg.list file stat
+      stat: path=/etc/apt/sources.list.d/pgdg.list
+      register: p
+    - name: Task 1 | Create file if needed
+      file: path=/etc/apt/sources.list.d/pgdg.list state=touch owner=root group=root mode=0644
+      when: p.stat.exists is defined and not p.stat.exists
+    - name: Task 1 | Create the file repository configuration
+      ansible.builtin.lineinfile:
+        path: /etc/apt/sources.list.d/pgdg.list
+        line: 'deb http://apt.postgresql.org/pub/repos/apt {{ ansible_distribution_release }}-pgdg main'
+        state: present
+    - name: Task 1 | Import the repository signing key
+      shell: wget --quiet -O - https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo apt-key add -
+    - name: Task 1 | Update the package lists
+      apt:
+        update_cache: yes
+        name: 
+          - postgresql-{{ pg_ver }}
+          - python3-pip
+        state: present
+    - name: Task 1 | install psycopg2-binary
+      pip:
+        name: psycopg2-binary
+    - name: trust local connections
+      lineinfile:
+        path: /etc/postgresql/{{ pg_ver }}/main/pg_hba.conf
+        regexp: 'host\s+all\s+all\s+127.0.0.1\/32'
+        line: 'host  all  all 127.0.0.1/32 trust'
+    - name: trust socket connections
+      lineinfile:
+        path: /etc/postgresql/{{ pg_ver }}/main/pg_hba.conf
+        regexp: 'local\s+all\s+all\s+peer'
+        line: 'local  all  all  trust'
+    - name: Apply pg config
+      become_user: postgres
+      postgresql_query:
+        db: postgres
+        query: select pg_reload_conf()
+    - name: Task 2 | Create SUPER user
+      become_user: postgres
+      postgresql_user: 
+        name: '{{ pg_superuser }}'
+        password: ''
+        db: postgres
+        priv: ALL
+        state: present
+        role_attr_flags: SUPERUSER
+    - name: Task 4 | Create database
+      become_user: postgres
+      postgresql_db:
+        name: '{{ pg_db }}'
+        encoding: UTF-8
+        lc_collate: en_US.UTF-8
+        lc_ctype: en_US.UTF-8
+        template: template0
+        owner: root
+    - name: Task 5&8 | Create user
+      become_user: postgres
+      postgresql_user:
+        db: '{{ pg_db }}'
+        name: '{{ pg_user }}'
+        priv: CONNECT/ALL
+        role_attr_flags: LOGIN
+    - name: Task 6 | Copy backup file to host
+      copy:
+        src: rebrain_courses_db.sql.bqp
+        dest: /tmp/
+    - name: Task 7 | Restore database
+      shell: psql -U root -d rebrain_courses_db -f /tmp/rebrain_courses_db.sql.bqp
+    - name: Task 9 | Create role backup
+      become_user: postgres
+      postgresql_user:
+        name: backup
+        role_attr_flags: NOLOGIN
+    - name: Task 11 | Grant usage
+      postgresql_query:
+        login_user: '{{ pg_superuser}}'
+        db: '{{ pg_db }}'
+        query: grant USAGE ON SCHEMA public TO rebrain_admin
+    - name: Task 11 | Alter default privilages
+      postgresql_query:
+        login_user: '{{ pg_superuser}}'
+        db: '{{ pg_db }}'
+        query: alter default privileges for role rebrain_admin in schema public grant select ON tables TO backup
+    - name: Task 12 | Create new table
+      postgresql_table:
+        db: '{{ pg_db }}'
+        login_user: '{{ pg_user }}'
+        table: blog
+        columns:
+          - id serial primary key
+          - user_id int not null
+          - blog_text text not null
+          - constraint fk_user_id foreign key (user_id) references users(user_id)
+    - name: Task 12 | Fill in new table
+      postgresql_query:
+        login_user: '{{ pg_user}}'
+        db: '{{ pg_db }}'
+        query: insert into blog(user_id, blog_text) values (1, 'We are studying at the REBRAIN PostgreSQL Workshop')
+    - name: Task 15 | Create role rebrain_group_select_access
+      postgresql_user:
+        login_user: '{{ pg_superuser}}'
+        db: '{{ pg_db }}'
+        name: rebrain_group_select_access
+        role_attr_flags: NOLOGIN
+    - name: Task 16 | Grant usage
+      postgresql_query:
+        login_user: '{{ pg_superuser}}'
+        db: '{{ pg_db }}'
+        query: grant USAGE ON SCHEMA public TO rebrain_group_select_access
+    - name: Task 17 | Grant privilages to rebrain_group_select_access
+      postgresql_query:
+        login_user: '{{ pg_superuser}}'
+        db: '{{ pg_db }}'
+        query: grant select on all tables in schema public TO rebrain_group_select_access
+    - name: Task 18 | Create role rebrain_user
+      postgresql_user:
+        login_user: '{{ pg_superuser}}'
+        db: '{{ pg_db }}'
+        name: rebrain_user
+        role_attr_flags: NOLOGIN
+    - name: Task 19 | Grant role
+      postgresql_query:
+        login_user: '{{ pg_superuser}}'
+        db: '{{ pg_db }}'
+        query: grant rebrain_group_select_access to rebrain_user
+    - name: Task 20 | Test data
+      postgresql_query:
+        login_user: '{{ pg_superuser}}'
+        db: '{{ pg_db }}'
+        query: set role rebrain_user; select * from users
+      register: task20_result
+    - debug:
+        msg: '{{ task20_result.query_result }}'
+    - name: Task 21 | Create role rebrain_portal
+      postgresql_user:
+        login_user: '{{ pg_superuser}}'
+        db: '{{ pg_db }}'
+        name: rebrain_portal
+        role_attr_flags: NOLOGIN
+    - name: Task 22 | Create schema rebrain_portal
+      postgresql_schema:
+        login_user: '{{ pg_superuser}}'
+        db: '{{ pg_db }}'
+        name: rebrain_portal
+    - name: Task 23 | Grant usage
+      postgresql_query:
+        login_user: '{{ pg_superuser}}'
+        db: '{{ pg_db }}'
+        query: grant USAGE ON SCHEMA rebrain_portal TO rebrain_portal
+    - name: Task 24 | Grant privilages
+      postgresql_query:
+        login_user: '{{ pg_superuser}}'
+        db: '{{ pg_db }}'
+        query: grant ALL ON SCHEMA rebrain_portal TO rebrain_portal
+    - name: Task 25 | Make backup
+      shell: pg_dump -U root rebrain_courses_db > /tmp/rebrain_courses_db_task04.sql.bqp
+    - name: Get backup local
+      fetch:
+        src: /tmp/rebrain_courses_db_task04.sql.bqp
+        dest: ./

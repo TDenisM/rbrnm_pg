@@ -1,0 +1,51 @@
+- name: db maintenance
+  hosts: hap
+  become: yes
+  vars:
+    - pg_db: rebrain_courses_db
+    - pg_user: rebrain_admin
+    - pg_password: rebrain_admin
+    - pg_superuser: admin
+    - pg_superpassword: admin
+  tasks:
+    - name: install postgres client
+      apt:
+        update_cache: yes
+        name:
+          - postgresql-client
+          - python3-pip
+        state: latest
+    - name: install psycopg2-binary
+      pip:
+        name: psycopg2-binary
+    - name: create user
+      postgresql_user:
+        login_user: '{{ pg_superuser }}'
+        login_password: '{{ pg_superpassword }}'
+        login_host: 127.0.0.1
+        port: 6432
+        db: postgres
+        name: '{{ pg_user }}'
+        password: '{{ pg_password }}'
+        priv: CONNECT/ALL
+        role_attr_flags: LOGIN,CREATEDB
+    - name: create database
+      postgresql_db:
+        login_user: '{{ pg_user }}'
+        login_password: '{{ pg_password }}'
+        login_host: 127.0.0.1
+        port: 6432
+        name: '{{ pg_db }}'
+        encoding: UTF-8
+        lc_collate: en_US.UTF-8
+        lc_ctype: en_US.UTF-8
+        template: template0
+        owner: '{{ pg_user }}'
+    - name: copy backup file
+      copy:
+        src: files/rebrain_courses_db.sql.bqp
+        dest: .
+    - name: deploy data
+      shell: psql postgres://{{ pg_user }}:{{ pg_password }}@127.0.0.1:6432/{{ pg_db }} < rebrain_courses_db.sql.bqp
+    - name: init pg_bench
+      shell: /usr/bin/pgbench -i postgres://{{ pg_superuser }}:{{ pg_superpassword }}@127.0.0.1:6432/postgres

@@ -1,0 +1,28 @@
+1. Установить postgresql 13 через пакетный менеджер.
+2. Добавьте в PostgreSQL пользователя root c правами SUPERUSER.
+3. Подключитесь к postgresql и создайте базу данных с именем task12.
+4. Создайте простую таблицу pgsql с полями ( id INT PRIMARY KEY, name TEXT NOT NULL ) в бд task12.
+5. С помощью функции generate_series заполните таблицу pgsql значениями от 1 до 100000, в котором поле name будет содержать рандомный текст в md5.
+INSERT INTO pgsql SELECT n , md5 (random()::text) FROM generate_series (1, 100000) AS foo(n);
+6. Получите план выполнения запроса, который выбирает все записи из таблицы pgsql, с помощью команды EXPLAIN.
+EXPLAIN SELECT * FROM pgsql;
+7. В выводе EXPLAIN найдите и сохраните в файл /opt/cost_preview.txt стоимость выборки первой строки, стоимость выборки всех строк, количество рядов (rows), а также среднею ширину кортежа в байтах. В формате:
+cost=*.**..****.** rows=****** width=**
+8. Выполните ANALYSE таблицы pgsql. Затем повторите EXPLAIN запрос из предыдущего задания.
+9. Вы должны увидеть, что результат вывода изменился, найдите и сохраните в файл /opt/cost.txt стоимость выборки первой строки, стоимость выборки всех строк, количество рядов (rows), а также средняю ширину кортежа в байтах.
+10. Выполните запрос стоимости, который возвращают все строки, идентификатор которых принадлежит диапазону от 10 до 20 с помощью команды: EXPLAIN ANALYZE SELECT * FROM pgsql WHERE id >= 10 and id < 20;
+и сохраните полученный результат в файл /opt/explain_cost.txt.
+11. Искуственно сбейте планировщик, выполнив запрос:
+EXPLAIN SELECT * FROM pgsql WHERE upper(id::text)::int < 20;
+и сохраните в файл /opt/expression.txt выражение, которое не выполнилось.
+12. Создать таблицу success_practice с полями (id int, description text, pgsql_id int references pgsql(id)) в бд task12.
+13. Заполнить таблицу success_practice данными.
+INSERT INTO success_practice (id, description, pgsql_id) SELECT n, md5(n::text), random()*99999+1 FROM generate_series(1,200000) AS foo(n);
+14. Получите историю успеха из таблицы pgsql, написав простой запрос, соединяющий таблицы pgsql и success_practice.
+EXPLAIN ANALYZE SELECT * FROM table_name1 inner JOIN table_name2 on table_name1.id = table_name2.table_name1_id WHERE table_name1_id = 1000;
+и запишите время исполнения (Execution Time) в файл /opt/execution_without_index.txt
+15. Cоздайте индекс по внешнему ключу для таблицы success_practice.
+CREATE index on success_practice (pgsql_id);
+16. Повторите запрос из п.14.
+После построения индекса время выполнения должно уменьшиться, запишите это время в файл /opt/execution_with_index.txt
+17. Если уверены, что все сделали правильно, отправляйте задание на проверку.

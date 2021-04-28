@@ -1,0 +1,171 @@
+1. На сервера etcd-1, etcd-2 и etcd-3 скачайте и установите etcd версии v3.4.14.
+Для этого на каждом из серверов etcd в директории /root/ создайте и запустите скрипт etcd_installer.sh:
+ETCD_VER=v3.4.14
+
+# choose either URL
+GOOGLE_URL=https://storage.googleapis.com/etcd
+GITHUB_URL=https://github.com/etcd-io/etcd/releases/download
+DOWNLOAD_URL=${GOOGLE_URL}
+
+rm -f /task13/etcd-${ETCD_VER}-linux-amd64.tar.gz
+rm -rf /task13/etcd/ && mkdir -p /task13/etcd/
+
+curl -L ${DOWNLOAD_URL}/${ETCD_VER}/etcd-${ETCD_VER}-linux-amd64.tar.gz -o /task13/etcd-${ETCD_VER}-linux-amd64.tar.gz
+tar xzvf /task13/etcd-${ETCD_VER}-linux-amd64.tar.gz -C /task13/etcd --strip-components=1
+rm -f /task13/etcd-${ETCD_VER}-linux-amd64.tar.gz
+
+/task13/etcd/etcd --version
+/task13/etcd/etcdctl version
+
+2. Используя пример конфига из официального репозитория (https://github.com/etcd-io/etcd/blob/release-3.4/etcd.conf.yml.sample) на каждом сервере с etcd настройте etcd так, чтобы использовались следующие параметры окружения и конфигурации:
+
+путь к исполняемому файлу etcd "/task13/etcd/etcd"
+
+путь к конфигурационному файлу etcd "/etc/etcd/etcd.yml"
+
+name: 'rebrain-etcd-node-X' |где X - номер сервера
+
+data-dir: '/task13/etcd/data-dir'
+
+wal-dir: '/task13/etcd/wal-dir'
+
+Формат для записи параметра listen-peer-urls: http://#{Внешний etcd-X IP}:2380,http://127.0.0.1:2380 |где X - номер сервера (например: http://135.181.196.92:2380)
+
+Формат для записи параметра listen-client-urls: http://#{Внешний etcd-X IP}:2379,http://127.0.0.1:2379 |где X - номер сервера (например: http://135.181.196.92:2379)
+
+Формат для записи параметра initial-advertise-peer-urls: http://#{Внешний etcd-X IP}:2380 |где X - номер сервера (например: http://135.181.196.92:2380)
+
+Формат для записи параметра advertise-client-urls: http://#{Внешний etcd-X IP}:2379 |где X - номер сервера (например: http://135.181.196.92:2379)
+
+initial-cluster: 'rebrain-etcd-node-1=http://#{Внешний etcd-1 IP}:2380,rebrain-etcd-node-2=http://#{Внешний etcd-2 IP}:2380,rebrain-etcd-node-3=http://#{Внешний etcd-3 IP}:2380'
+
+initial-cluster-token: 'etcd-cluster-rebrain-token'
+
+
+3. На каждом сервере с etcd cоздайте пользователя и группу etcd, измените рекурсивно владельца рабочей директории /task13/etcd/ и директории с конфигами /etc/etcd/ на etcd.
+Установите etcd в качесчтве сервиса systemd. Должны быть выполнены следующие требования:
+
+файл сервиса должен быть создан в директории "/etc/systemd/system/" с именем "etcd.service"
+в файле "etcd.service" должны содержаться следующие параметры:
+в блоке [Unit]
+Description=etcd key-value store
+Documentation=https://github.com/etcd-io/etcd
+After=network.target
+в блоке [Service]
+User=etcd
+Type=notify
+ExecStart=/task13/etcd/etcd --config-file /etc/etcd/etcd.yml
+Restart=always
+в блоке [Install]
+WantedBy=multi-user.target
+
+4. Запустите etcd, проверьте его работоспособность и узнайте, какая нода является ведущей (является мастер-нодой), сколько members в кластере и их имена, какие из них активны. Все ноды должны быть в состоянии helthy.
+5. На сервера patroni-1, patroni-2 и patroni-3 из оффициального репозитория PostgreSQL установите PostgreSQL v13. Проверьте, чтобы СУБД PostgreSQL была установлена в качестве сервиса systemd и сам сервис находился в состоянии ОСТАНОВЛЕН. Если сервис PostgreSQL запущен, остановите его командой "systemctl stop postgresql"!
+6.На сервера patroni-1, patroni-2 и patroni-3 установите ряд зависимостей patroni:
+
+apt -y install python3-pip python3-dev libpq-dev
+
+pip3 install --upgrade setuptools pip
+
+pip install psycopg2-binary
+
+
+7. На сервера patroni-1, patroni-2 и patroni-3 установите patroni[etcd], при этом используя следующие параметры окружения и конфигурации:
+
+путь к исполняемому файлу patroni "/usr/local/bin/patroni"
+
+путь к конфигурационному файлу patroni "/etc/patroni/patroni.yml"
+
+scope: rebrain
+
+namespace: /rebrain-cluster/
+
+name: rebrain-postgres-node-X |где X - номер сервера patroni
+
+при настройке блоков "restapi/listen","restapi/connect_address","etcd/hosts","postgresql/listen","postgresql/connect_address" должны использоваться только внешние IP-адреса серверов
+
+при настройке блока "pg_hba" для replication должны использоваться только внешние IP-адреса серверов, для root должна использоваться следующая строка "- host all root 0.0.0.0/0 md5"
+
+в момент инициализации patroni должен создать пользователя "rebrain_admin" c паролем "rebrain_admin_password"
+
+при работе с блоком "postgresql/authentication" patroni должен создать super-пользователя "root" c паролем "admin"
+
+при работе с блоком "postgresql/authentication" для репликации patroni должен создать пользователя "replicator" c паролем "replicatorSuperHarDpwd"
+
+остальные настройки patroni взять из описания
+
+
+8. Установите рекурсивно владельца postgres на директории /task13/patroni/ и /etc/patroni/. Установите patroni в качесчтве сервиса systemd. Должны быть выполнены следующие требования:
+
+файл сервиса должен быть создан в директории "/etc/systemd/system/" с именем "patroni.service"
+в файле "patroni.service" должны содержаться следующие параметры:
+в блоке [Unit]
+Description=Patroni needs to orchestrate a high-availability PostgreSQL
+Documentation=https://patroni.readthedocs.io/en/latest/
+After=syslog.target network.target
+в блоке [Service]
+User=postgres
+Group=postgres
+Type=simple
+ExecStart=/usr/local/bin/patroni /etc/patroni/patroni.yml
+Restart=no
+в блоке [Install]
+WantedBy=multi-user.target
+
+9. Запустите Patroni на серверах patroni-1, patroni-2 и patroni-3.
+10. Проверте работоспособность кластера PostgreSQL под управлением Patroni и получите информацию о нодах. Узнайте, какая из нод лидер кластера на данный момент. Затем проверьте работу репликации. Подключитесь к лидеру c помощью psql создайте таблицу test:
+CREATE TABLE test (id SERIAL Primary Key NOT NULL, info TEXT);
+
+Внесите в таблицу test следующие данные:
+INSERT INTO test (info) VALUES ('Hello'),('From'),('Patroni'),('Leader');
+
+Затем зайдите на любую из реплик с помощью psql и получите все данные из таблицы test командой:
+SELECT * FROM test;
+
+Вы должны увидеть следующий вывод:
+
+id | info
+----+---------
+1 | Hello
+2 | From
+3 | Patroni
+4 | Leader
+(4 rows)
+
+Если вы его увидели, репликация работает.
+11. На сервере HAProxy из официальных репозиториев Ubuntu установите HAProxy. Настройте HAProxy так, чтобы:
+
+конфигурационный файл HAProxy находился в директории /etc/haproxy/
+
+настройки в конфигурационном файле HAProxy haproxy.cfg соответствовали следующим значениям:
+
+listen stats
+mode http
+bind *:32700
+stats enable
+stats uri /
+frontend ft_postgresql
+bind *:5432
+mode tcp
+default_backend bk_db
+backend bk_db
+option httpchk
+mode tcp
+server patroni_node_1_IP patroni_node_1_IP:5432 maxconn 100 check port 8008
+server patroni_node_2_IP patroni_node_2_IP:5432 maxconn 100 check port 8008
+server patroni_node_2_IP patroni_node_3_IP:5432 maxconn 100 check port 8008
+12. Проверьте работоспособность HAPropxy зайдите на страницу HAPropxy_IP:32700, там вы должны увидеть HAPropxy stats. Узнайте IP текущего лидера кластера c любого сервера, где есть psql командой:
+psql -h HAproxy_ip_addr -p 5432 -d postgres -U root -W -c "select inet_server_addr();"
+
+13. Убейте лидера кластера PostgreSQL, для этого остановите PostgreSQL на ноде, которая на данный момент является лидером. Убедитесь, что Patroni произвел переключение. Узнайте IP нового лидера.
+14. Если уверены, что все сделали правильно, сдавайте задание на проверку.
+
+Инфраструктура:
+
+Server etcd-1: public ip: 165.227.171.56, login: root, password: vtpvezgvbwmx;
+Server etcd-2: public ip: 206.81.21.19, login: root, password: qlvlvzwdvsnn;
+Server etcd-3: public ip: 165.227.134.99, login: root, password: vdssqusqvdtt;
+Server patroni-1: public ip: 46.101.116.37, login: root, password: ompalzdbymrz;
+Server patroni-2: public ip: 165.22.28.248, login: root, password: syyqhfxrgmvc;
+Server patroni-3: public ip: 159.89.3.253, login: root, password: rbqqzkzbaxzk;
+Server HAProxy: public ip: 46.101.252.64, login: root, password: prdcnxkpnxko;

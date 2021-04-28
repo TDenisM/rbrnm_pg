@@ -1,0 +1,109 @@
+- name: Common
+  hosts: all
+  become: true
+  vars:
+    - pg_ver: 11
+    - pg_common_role: car_portal_app
+  tasks:
+    - name: Get pgdg.list file stat
+      stat: path=/etc/apt/sources.list.d/pgdg.list
+      register: p
+    - name: Create file if needed
+      file: path=/etc/apt/sources.list.d/pgdg.list state=touch owner=root group=root mode=0644
+      when: p.stat.exists is defined and not p.stat.exists
+    - name: Create the file repository configuration
+      ansible.builtin.lineinfile:
+        path: /etc/apt/sources.list.d/pgdg.list
+        line: 'deb http://apt.postgresql.org/pub/repos/apt {{ ansible_distribution_release }}-pgdg main'
+        state: present
+    - name: Import the repository signing key
+      shell: wget --quiet -O - https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo apt-key add -
+    - name: Update the package lists
+      apt:
+        update_cache: yes
+        name: 
+          - postgresql-{{ pg_ver }}
+          - python3-pip
+        state: present
+    - name: install psycopg2-binary
+      pip:
+        name: psycopg2-binary
+    - name: trust local connections
+      lineinfile:
+        path: /etc/postgresql/{{ pg_ver }}/main/pg_hba.conf
+        regexp: 'host\s+all\s+all\s+127.0.0.1\/32'
+        line: 'host all all 127.0.0.1/32 trust'
+      notify: Restart PostgreSQL
+    - name: trust socket connections
+      lineinfile:
+        path: /etc/postgresql/{{ pg_ver }}/main/pg_hba.conf
+        regexp: 'local\s+all\s+postgres\s+peer'
+        line: 'local all postgres trust'
+      notify: Restart PostgreSQL
+    - name: Create role
+      become_user: postgres
+      postgresql_user:
+        name: '{{ pg_common_role }}'
+        role_attr_flags: LOGIN
+    - name: trust role connection  connections
+      lineinfile:
+        path: /etc/postgresql/{{ pg_ver }}/main/pg_hba.conf
+        line: 'host all {{ pg_common_role }} 0.0.0.0/0 trust'
+        state: present
+      notify:
+        - Restart PostgreSQL
+    - name: Listen to all addresses
+      lineinfile:
+        path: /etc/postgresql/{{ pg_ver }}/main/postgresql.conf
+        regexp: "#listen_addresses = 'localhost'"
+        line: "listen_addresses = '*'         # what IP address(es) to listen on;"
+        state: present
+      notify: Restart PostgreSQL
+    - name: Set timezone
+      timezone:
+        name: Europe/Moscow
+  handlers:
+    - name: Restart PostgreSQL
+      become: yes
+      service: 
+        name: postgresql
+        state: restarted
+      listen: 'Restart PostgreSQL'
+
+- name: Publisher setup
+  become: true
+  hosts: s1
+  vars:
+    - pg_ver: 11
+    - pg_common_role: car_portal_app
+  tasks:
+    - name: Set hostname
+      hostname:
+        name: publisher
+    - name: Set WAL level
+      lineinfile:
+        path: /etc/postgresql/{{ pg_ver }}/main/postgresql.conf
+        regexp: "#wal_level = replica"
+        line: "wal_level = replica                    # minimal, replica, or logical"
+        state: present
+      notify: Restart PostgreSQL
+    - name: Copy schema to remote
+      copy:
+        src: schema1.sql
+        dest: /opt/schema.sql
+    - name: Copy data to remote
+      copy:
+        src: data1.sql
+        dest: /opt/data.sql
+    - name: Restore schema
+      shell: psql -U postgres -h localhost < /opt/schema.sql
+    - name: Restore data
+      shell: psql -U postgres -h localhost < /opt/data.sql
+  handlers:
+    - name: Restart PostgreSQL
+      become: yes
+      service:
+        name: postgresql
+        state: restarted
+      listen: 'Restart PostgreSQL'
+

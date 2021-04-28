@@ -1,0 +1,12 @@
+[Unit]
+Description=Patroni needs to orchestrate a high-availability PostgreSQL
+Documentation=https://patroni.readthedocs.io/en/latest/
+After=syslog.target network.target
+[Service]
+User=postgres
+Group=postgres
+Type=simple
+ExecStart=/usr/local/bin/patroni /etc/patroni/patroni.yml
+Restart=no
+[Install]
+WantedBy=multi-user.target

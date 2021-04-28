@@ -1,0 +1,311 @@
+- name: Monitoring
+  hosts: s1
+  become: yes
+  vars:
+    - pg_ver: 13
+    - pg_superuser: root
+    - pg_mon_user: rebrain_monitoring
+    - pg_db: rebrain_courses_db
+    - pg_user: rebrain_admin
+  tasks:
+    - name: Get pgdg.list file stat
+      stat: path=/etc/apt/sources.list.d/pgdg.list
+      register: p
+    - name: Create file if needed
+      file: path=/etc/apt/sources.list.d/pgdg.list state=touch owner=root group=root mode=0644
+      when: p.stat.exists is defined and not p.stat.exists
+    - name: Create the file repository configuration
+      lineinfile:
+        path: /etc/apt/sources.list.d/pgdg.list
+        line: 'deb http://apt.postgresql.org/pub/repos/apt {{ ansible_distribution_release }}-pgdg main'
+        state: present
+    - name: Import the repository signing key
+      shell: wget --quiet -O - https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo apt-key add -
+    - name: add grafana pero
+      shell: echo "deb https://packages.grafana.com/oss/deb stable main" | sudo tee -a /etc/apt/sources.list.d/grafana.list
+    - name: add grafana key
+      shell: wget -q -O - https://packages.grafana.com/gpg.key | sudo apt-key add -
+    - name: Update the package lists
+      apt:
+        update_cache: yes
+        name:
+          - postgresql-{{ pg_ver }}
+          - python3-pip
+          - apt-transport-https
+          - software-properties-common
+        state: latest
+    - name: add grafana pero
+      shell: echo "deb https://packages.grafana.com/oss/deb stable main" | sudo tee -a /etc/apt/sources.list.d/grafana.list
+    - name: update all
+      apt:
+        name: '*'
+        state: latest
+        update_cache: yes
+    - name: install grafana
+      apt:
+        name: grafana
+        update_cache: yes
+        state: latest
+    - name: start grafana
+      service:
+        name: grafana-server.service
+        state: started
+        enabled: yes
+    - name: install psycopg2-binary
+      pip:
+        name: psycopg2-binary
+    - name: trust local connections
+      lineinfile:
+        path: /etc/postgresql/{{ pg_ver }}/main/pg_hba.conf
+        regexp: 'host\s+all\s+all\s+127.0.0.1\/32'
+        line: 'host  all  all 127.0.0.1/32 trust'
+    - name: trust socket connections
+      lineinfile:
+        path: /etc/postgresql/{{ pg_ver }}/main/pg_hba.conf
+        regexp: 'local\s+all\s+all\s+peer'
+        line: 'local  all  all  trust'
+    - name: restart
+      service:
+        name: postgresql
+        state: restarted
+        enabled: yes
+    - name: Create SUPER user
+      postgresql_user:
+        login_user: postgres
+        login_host: localhost
+        name: '{{ pg_superuser }}'
+        password: ''
+        db: postgres
+        priv: ALL
+        state: present
+        role_attr_flags: SUPERUSER
+    - name: Create SUPER user
+      postgresql_user:
+        login_user: postgres
+        login_host: localhost
+        name: '{{ pg_mon_user }}'
+        password: ''
+        db: postgres
+        priv: ALL
+        state: present
+        role_attr_flags: SUPERUSER
+    - name: Create database
+      postgresql_db:
+        login_user: '{{ pg_superuser }}'
+        login_host: localhost
+        name: '{{ pg_db }}'
+        encoding: UTF-8
+        lc_collate: en_US.UTF-8
+        lc_ctype: en_US.UTF-8
+        template: template0
+        owner: root
+    - name: Create user
+      postgresql_user:
+        login_user: '{{ pg_superuser }}'
+        login_host: localhost
+        db: '{{ pg_db }}'
+        name: '{{ pg_user }}'
+        priv: CONNECT/ALL
+        role_attr_flags: LOGIN
+    - name: if archive file exists
+      stat:
+        path: prometheus-2.25.2.linux-amd64.tar.gz
+      register: arc_file
+    - name: download prometheus archive
+      get_url:
+        url: https://github.com/prometheus/prometheus/releases/download/v2.25.2/prometheus-2.25.2.linux-amd64.tar.gz
+        dest: .
+      when: arc_file.stat.exists == false
+    - name: if folder exists
+      stat:
+        path: prometheus-2.25.2.linux-amd64
+      register: arc_folder
+    - name: uncompress
+      unarchive:
+        src: prometheus-2.25.2.linux-amd64.tar.gz
+        dest: .
+        remote_src: yes
+      when: arc_folder.stat.exists == false
+    - name: add OS group
+      group:
+        name: prometheus
+        system: yes
+    - name: add OS user
+      user:
+        name: prometheus
+        group: prometheus
+        create_home: no
+        shell: /bin/false
+    - name: create /etc/prometheus
+      file:
+        path: /etc/prometheus
+        state: directory
+        owner: prometheus
+        group: prometheus
+    - name: create /etc/prometheus subfolders
+      file:
+        path: /etc/prometheus/{{ item }}
+        state: directory
+        owner: prometheus
+        group: prometheus
+      with_items:
+        - rules
+        - rules.d
+        - files_sd
+    - name: create /val/lib/prometheus
+      file:
+        path: /var/lib/prometheus
+        state: directory
+        owner: prometheus
+        group: prometheus
+    - name: is prom bin files moved
+      stat:
+        path: prometheus-2.25.2.linux-amd64/prometheus
+      register: prom_bin_files
+    - name: move prometheus bin files
+      shell: 'mv prometheus-2.25.2.linux-amd64/prometheus /usr/local/bin/'
+      when: prom_bin_files.stat.exists
+    - name: if promtool bin files moved
+      stat:
+        path: prometheus-2.25.2.linux-amd64/promtool
+      register: promtool_bin_files
+    - name: move promtool bin files
+      shell: 'mv prometheus-2.25.2.linux-amd64/promtool /usr/local/bin/'
+      when: promtool_bin_files.stat.exists
+    - name: if console files moved
+      stat:
+        path: prometheus-2.25.2.linux-amd64/console
+      register: console_files
+    - name: move consoles
+      shell: 'mv prometheus-2.25.2.linux-amd64/console /usr/local/bin/'
+      when: console_files.stat.exists
+    - name: if console_libs files moved
+      stat:
+        path: prometheus-2.25.2.linux-amd64/console_libraries
+      register: console_libs_files
+    - name: move console_libraries
+      shell: 'mv prometheus-2.25.2.linux-amd64/console_libraries /etc/prometheus'
+      when: console_libs_files.stat.exists
+    - name: set permissions
+      file:
+        path:
+          - /etc/prometheus/consoles
+          - /etc/prometheus/console_libraries
+        recurse: yes
+        owner: prometheus
+        group: prometheus
+    - name: copy config
+      copy:
+        src: prometheus.yml
+        dest: /etc/prometheus/
+        owner: prometheus
+        group: prometheus
+    - name: create service
+      copy:
+        src: prometheus.service
+        dest: /etc/systemd/system/prometheus.service
+    - name: reload systemd
+      shell: systemctl daemon-reload
+    - name: start prom service
+      service:
+        name: prometheus.service
+        state: started
+        enabled: yes
+    - name: if node exporter archive exists
+      stat:
+        path: node_exporter-1.1.2.linux-amd64.tar.gz
+      register: node_exporter_arc_file
+    - name: donwload node exporter
+      get_url:
+        url: https://github.com/prometheus/node_exporter/releases/download/v1.1.2/node_exporter-1.1.2.linux-amd64.tar.gz
+        dest: .
+      when: node_exporter_arc_file.stat.exists == false
+    - name: if folder exists
+      stat:
+        path: node_exporter-1.1.2.linux-amd64
+      register: node_exporter_arc_folder
+    - name: uncompress
+      unarchive:
+        src: node_exporter-1.1.2.linux-amd64.tar.gz
+        dest: .
+        remote_src: yes
+      when: node_exporter_arc_folder.stat.exists == false
+    - name: add OS group
+      group:
+        name: node_exporter
+        system: yes
+    - name: add OS user
+      user:
+        name: node_exporter
+        group: node_exporter
+        create_home: no
+        shell: /bin/false
+    - name: copy node exporter bin file
+      copy:
+        src: node_exporter-1.1.2.linux-amd64/node_exporter
+        dest: /usr/local/bin/
+        owner: node_exporter
+        group: node_exporter
+        mode: u=+x,g=+x,o=+x
+        remote_src: yes
+    - name: copy servive config file
+      copy:
+        src: node_exporter.service
+        dest: /etc/systemd/system/
+    - name: reload systemd 
+      shell: systemctl daemon-reload
+    - name: start node exporter service
+      service:
+        name: node_exporter.service
+        state: started
+        enabled: yes
+    - name: is pg exporter arc file exists
+      stat:
+        path: postgres_exporter-0.9.0.linux-amd64.tar.gz
+      register: pg_expoter_arc_file
+    - name: download postgres exporter
+      get_url:
+        url: https://github.com/prometheus-community/postgres_exporter/releases/download/v0.9.0/postgres_exporter-0.9.0.linux-amd64.tar.gz
+        dest: .
+      when: pg_expoter_arc_file.stat.exists == false
+    - name: if pg exporter folder exists
+      stat:
+        path: postgres_exporter-0.9.0.linux-amd64
+      register: pg_exporter_folder
+    - name: uncompress pg exporter arc file
+      unarchive:
+        src: postgres_exporter-0.9.0.linux-amd64.tar.gz
+        dest: .
+        remote_src: yes
+      when: pg_exporter_folder.stat.exists == false
+    - name: add OS group
+      group:
+        name: postgres_exporter
+        system: yes
+    - name: add OS user
+      user:
+        name: postgres_exporter
+        group: postgres_exporter
+        create_home: no
+        shell: /bin/false
+    - name: copy node exporter bin file
+      copy:
+        src: postgres_exporter-0.9.0.linux-amd64/postgres_exporter
+        dest: /usr/local/bin/
+        owner: postgres_exporter
+        group: postgres_exporter
+        mode: u=+x,g=+x,o=+x
+        remote_src: yes
+    - name: copy pg exporter service file
+      copy:
+        src: postgres_exporter.service
+        dest: /etc/systemd/system/
+    - name: reload systemd
+      shell: systemctl daemon-reload
+    - name: start pg exporter service
+      service:
+        name: postgres_exporter.service
+        state: started
+        enabled: yes
+      environment:
+        

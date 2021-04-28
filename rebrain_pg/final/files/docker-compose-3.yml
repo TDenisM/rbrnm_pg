@@ -1,0 +1,45 @@
+version: '3.8'
+
+services:
+  hap:
+    image: haproxy
+    networks:
+      - net
+    ports:
+      - 6432:6432
+      - 7000:7000
+    configs:
+      - source: haproxy.cfg
+        target: /usr/local/etc/haproxy/haproxy.cfg
+        uid: '0'
+        gid: '0'
+        mode: 0640
+    deploy:
+      placement:
+        constraints:
+          - node.labels.label == hap
+    restart: on-failure
+    depends_on:
+      - pgb1
+      - pgb2
+      - etcd1
+      - etcd2
+      - etcd3
+      - patroni1
+      - patroni2
+      - patroni3
+      - patroni4
+      - confd1
+      - confd2
+
+networks:
+  net:
+    external: true
+
+configs:
+  haproxy.cfg:
+    external: true
+
+volumes:
+  pgb:
+    external: true

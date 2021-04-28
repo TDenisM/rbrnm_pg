@@ -1,0 +1,1 @@
+DATA_SOURCE_NAME=postgresql://rebrain_monitoring@localhost:5432/rebrain_courses_db?sslmode=disable

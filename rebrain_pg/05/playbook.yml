@@ -1,0 +1,111 @@
+- name: UBUNTU19
+  hosts: u20
+  become: true
+  vars:
+    - pg_ver: 12
+    - pg_superuser: root
+    - pg_db: rebrain
+    - pg_user: extuser
+  tasks:
+    - name: Task 1 | Get pgdg.list file stat
+      stat: path=/etc/apt/sources.list.d/pgdg.list
+      register: p
+    - name: Task 1 | Create file if needed
+      file: path=/etc/apt/sources.list.d/pgdg.list state=touch owner=root group=root mode=0644
+      when: p.stat.exists is defined and not p.stat.exists
+    - name: Task 1 | Create the file repository configuration
+      ansible.builtin.lineinfile:
+        path: /etc/apt/sources.list.d/pgdg.list
+        line: 'deb http://apt.postgresql.org/pub/repos/apt {{ ansible_distribution_release }}-pgdg main'
+        state: present
+    - name: Task 1 | Import the repository signing key
+      shell: wget --quiet -O - https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo apt-key add -
+    - name: Task 1 | Update the package lists
+      apt:
+        update_cache: yes
+        name: 
+          - postgresql-{{ pg_ver }}
+          - python3-pip
+        state: present
+    - name: Task 1 | install psycopg2-binary
+      pip:
+        name: psycopg2-binary
+    - name: trust local connections
+      lineinfile:
+        path: /etc/postgresql/{{ pg_ver }}/main/pg_hba.conf
+        regexp: 'host\s+all\s+all\s+127.0.0.1\/32'
+        line: 'host  all  all 127.0.0.1/32 trust'
+    - name: trust socket connections
+      lineinfile:
+        path: /etc/postgresql/{{ pg_ver }}/main/pg_hba.conf
+        regexp: 'local\s+all\s+all\s+peer'
+        line: 'local  all  all  trust'
+    - name: Apply pg config
+      become_user: postgres
+      postgresql_query:
+        db: postgres
+        query: select pg_reload_conf()
+    - name: Task 2 | Create SUPER user
+      become_user: postgres
+      postgresql_user: 
+        name: '{{ pg_superuser }}'
+        password: ''
+        db: postgres
+        priv: ALL
+        state: present
+        role_attr_flags: SUPERUSER
+    - name: Task 3 | Create database
+      become_user: postgres
+      postgresql_db:
+        name: '{{ pg_db }}'
+        encoding: UTF-8
+        lc_collate: en_US.UTF-8
+        lc_ctype: en_US.UTF-8
+        template: template0
+        owner: root
+    - name: Task 3 | Create user
+      become_user: postgres
+      postgresql_user:
+        db: '{{ pg_db }}'
+        name: '{{ pg_user }}'
+        priv: CONNECT/ALL
+        role_attr_flags: LOGIN
+    - name: Task 4 | Install pg_cron
+      apt:
+        name:
+          - 'postgresql-{{ pg_ver }}-cron'
+    - name: Edit postgresql.conf
+      lineinfile:
+        path: '/etc/postgresql/{{ pg_ver }}/main/postgresql.conf'
+        line: '{{ item }}'
+      with_items:
+        - shared_preload_libraries = 'pg_cron'
+        - cron.database_name = '{{ pg_db }}'
+    - name: Restart pg
+      service:
+        name: postgresql
+        state: restarted
+    - name: If extention exists
+      postgresql_query:
+        login_user: '{{ pg_superuser}}'
+        db: '{{ pg_db }}'
+        query: select * from pg_extension where extname = 'pg_cron'
+      register: cron_result
+    - name: Prepare
+      postgresql_query:
+        login_user: '{{ pg_superuser }}'
+        db: '{{ pg_db }}'
+        query: CREATE EXTENSION pg_cron
+      when: cron_result.rowcount|int == 0
+    - name: Grant access
+      postgresql_query:
+        login_user: '{{ pg_superuser }}'
+        db: '{{ pg_db }}'
+        query: 'GRANT USAGE ON SCHEMA cron TO {{ pg_user}}'
+    - name: Task 5
+      postgresql_query:
+        login_user: '{{ pg_user }}'
+        db: '{{ pg_db }}'
+        query: SELECT cron.schedule('nightly-vacuum', '0 2 * * *', 'VACUUM')
+      
+#INSERT INTO cron.job (schedule, command, nodename, nodeport, database, username) VALUES ('0 2 * * *', 'vacuum;', '', 5432, 'rebrain', 'extuser')

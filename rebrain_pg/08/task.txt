@@ -1,0 +1,33 @@
+1. Установить postgresql 13 через пакетный менеджер.
+2. Восстановить schema.sql и data.sql из /opt.
+3. Установить пакет EPEL epel-release-latest-7.noarch.rpm.
+4. Установить интерпритатор pip3.
+5. Установить python3 пакеты:
+- lzop
+- pv
+- python36-setuptools
+6. Установить WAL-E для aws s3.
+7. Установить pip3 расширение boto.
+8. Создать каталог /etc/wal-e/env.
+9. Выставить права на каталог для группы postgres.
+10. Добавить в каталог из п.8 переменные среды:.
+
+echo 'key-id' > /etc/wal-e/env/AWS_ACCESS_KEY_ID
+echo 'key-value' > /etc/wal-e/env/AWS_SECRET_ACCESS_KEY
+echo 'bucket-path' > /etc/wal-e/env/WALE_S3_PREFIX
+echo 'eu-central-1' > /etc/wal-e/env/AWS_REGION
+
+
+значения переменных для каждого пользователя индивидуальные в инфраструктуре
+11. Установить envdir.
+12. Настроить архивацию журналов транзакций в файле postgresql.conf.
+13. Убедиться в работоспособности архивации в s3, путем выполнения команды:
+
+sudo -u postgres bash -c '/usr/local/bin/envdir /etc/wal-e/env /usr/local/bin/wal-e backup-list' > /tmp/file
+
+
+14. Если уверены, что все сделали правильно, отправляйте задание на проверку.
+Infrastructure:
+Server master: public ip: 68.183.75.30, login: root, password: kjapfdlnjxih;
+AWS_ACCESS_KEY_ID: AKIAZMJMH6DAVXYG7I47, AWS_SECRET_ACCESS_KEY: 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
+S3 Bucket name: d0219f9bf915e2c45aad53ca0eefa126, S3 bucket url: http://d0219f9bf915e2c45aad53ca0eefa126.s3.amazonaws.com/, AWS_REGION: eu-central-1

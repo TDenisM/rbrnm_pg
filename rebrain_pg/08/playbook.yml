@@ -1,0 +1,169 @@
+- name: Task 08
+  hosts: s1
+  become: yes
+  vars:
+    - pg_ver: 13
+    - AWS_ACCESS_KEY_ID: AKIAZMJMH6DAZJLBFLJT
+    - AWS_SECRET_ACCESS_KEY: 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
+    - S3_BUCKET_NAME: d0219f9bf915e2c45aad53ca0eefa126
+    - S3_BUCKET_URL: s3://d0219f9bf915e2c45aad53ca0eefa126.s3.amazonaws.com
+    - AWS_REGION: eu-central-1
+  tasks:
+    - name: Set timezone
+      timezone:
+        name: 'Europe/Moscow'
+    - name: Install repo
+      yum:
+        name:
+          - https://download.postgresql.org/pub/repos/yum/reporpms/EL-7-x86_64/pgdg-redhat-repo-latest.noarch.rpm
+          - https://dl.fedoraproject.org/pub/epel/epel-release-latest-7.noarch.rpm
+        state: latest
+    - name: Install packages
+      yum:
+        name:
+          - postgresql{{ pg_ver }}-server
+          - firewalld
+          - python36
+          - python36-pip
+          - python36-devel
+          - python-setuptools
+          - python36-setuptools
+          - lzop
+          - pv
+          - gcc
+        state: latest
+        update_cache: yes
+    - name: Check initdb
+      stat:
+        path: /var/lib/pgsql/{{ pg_ver }}/data/pg_hba.conf
+      register: initdb_stat
+    - name: Run initdb
+      shell: /usr/bin/postgresql-{{ pg_ver }}-setup initdb
+      when: initdb_stat.stat.exists == false
+    - name: Install python packages
+#      become: no
+      pip:
+        name:
+          - psycopg2-binary
+#          - https://github.com/wal-e/wal-e/archive/v1.1.1.tar.gz
+          - wal-e
+          - boto
+          - envdir
+#        extra_args: --user
+        executable: pip3.6
+    - name: boto
+      shell: python3 -c 'import boto; print(boto.__path__[0])' | xargs -I{} sudo chmod -R a+rx {}
+    - name: create wal-e dir
+      file: 
+        path: /etc/wal-e/env
+        state: directory
+        owner: postgres
+        group: postgres
+        mode: '0750'
+    - name: trust local connections
+      lineinfile:
+        path: /var/lib/pgsql/{{ pg_ver }}/data/pg_hba.conf
+        regexp: 'host\s+all\s+all\s+127.0.0.1\/32'
+        line: 'host all all 127.0.0.1/32 trust'
+      notify: Restart PostgreSQL
+    - name: trust socket connections
+      lineinfile:
+        path: /var/lib/pgsql/{{ pg_ver }}/data/pg_hba.conf
+        regexp: 'local\s+all\s+postgres\s+peer'
+        line: 'local all postgres trust'
+      notify: Restart PostgreSQL
+    - name: set wal level
+      lineinfile:
+        path: /var/lib/pgsql/{{ pg_ver }}/data/postgresql.conf
+        regexp: '#wal_level = replica'
+        line: 'wal_level = replica                    # minimal, replica, or logical'
+      notify: Restart PostgreSQL
+    - name: set archive mode
+      lineinfile:
+        path: /var/lib/pgsql/{{ pg_ver }}/data/postgresql.conf
+        regexp: '#archive_mode = off'
+        line: 'archive_mode = on             # enables archiving; off, on, or always'
+      notify: Restart PostgreSQL
+    - name: set archive command
+      lineinfile:
+        path: /var/lib/pgsql/{{ pg_ver }}/data/postgresql.conf
+        regexp: "#archive_command = ''"
+        line: "archive_command = 'envdir /etc/wal-e/env wal-e wal-push %p'  # command to use to archive a logfile segment"
+      notify: Restart PostgreSQL
+    - name: set archive timeout
+      lineinfile:
+        path: /var/lib/pgsql/{{ pg_ver }}/data/postgresql.conf
+        regexp: '#archive_timeout = 0'
+        line: 'archive_timeout = 60            # force a logfile segment switch after this'
+      notify: Restart PostgreSQL
+#    - name: test schema file
+#      stat:
+#        path: /opt/schema.sql
+#      register: schema
+#    - debug:
+#        msg: '{{ schema.stat.exists }}'
+#    - name: test data file
+#      stat:
+#        path: /opt/data.sql
+#      register: data
+    - name: Flush handlers
+      meta: flush_handlers
+    - name: upload schema
+      copy:
+        src: schema1.sql
+        dest: /opt/schema.sql
+    - name: upload data
+      copy:
+        src: data1.sql
+        dest: /opt/data.sql
+    - name: import schema
+      shell: psql -U postgres -h 127.0.0.1 < /opt/schema.sql
+#      when: schema.stat.exists
+    - name: import data
+      shell: psql -U postgres -h 127.0.0.1 < /opt/data.sql
+#      when: data.stat.exists
+#    - name: get schema
+#      fetch:
+#        src: /opt/schema.sql
+#        dest: files/schema.sql
+#      when: schema.stat.exists
+#    - name: get data
+#      fetch:
+#        src: /opt/data.sql
+#        dest: files/data.sql
+#      when: data.stat.exists
+    - name: AWS_ACCESS_KEY_ID
+      lineinfile:
+        path: /etc/wal-e/env/AWS_ACCESS_KEY_ID
+        create: yes
+        line: '{{ AWS_ACCESS_KEY_ID }}'
+        state: present
+        owner: postgres
+    - name: AWS_SECRET_ACCESS_KEY
+      lineinfile:
+        path: /etc/wal-e/env/AWS_SECRET_ACCESS_KEY
+        create: yes
+        line: '{{ AWS_SECRET_ACCESS_KEY }}'
+        state: present
+        owner: postgres
+    - name: S3_BUCKET_URL
+      lineinfile:
+        path: /etc/wal-e/env/WALE_S3_PREFIX
+        create: yes
+        line: '{{ S3_BUCKET_URL }}'
+        state: present
+        owner: postgres
+    - name: AWS_REGION
+      lineinfile:
+        path: /etc/wal-e/env/AWS_REGION
+        create: yes
+        line: '{{ AWS_REGION }}'
+        state: present
+        owner: postgres
+  handlers:
+    - name: Restart PostgreSQL
+      become: yes
+      service:
+        name: postgresql-{{ pg_ver }}.service
+        state: restarted
+      listen: 'Restart PostgreSQL'    

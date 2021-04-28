@@ -1,0 +1,6 @@
+- name: Prepare
+  hosts: all
+  become: yes
+  tasks:
+    - name: change hostnames
+      shell: hostname {{ ansible_hostname }}

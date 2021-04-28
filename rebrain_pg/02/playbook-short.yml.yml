@@ -1,0 +1,32 @@
+- name: UBUNTU19
+  hosts: u20
+  become: true
+  vars:
+    - pg_ver: 13
+    - pg_superuser: vagrant
+    - pg_db: rebrain_cources_db
+    - pg_user: rebrain_admin
+  tasks:
+    - name: Get pgdg.list file stat
+      stat: path=/etc/apt/sources.list.d/pgdg.list
+      register: p
+    - name: Create file if needed
+      file: path=/etc/apt/sources.list.d/pgdg.list state=touch owner=root group=root mode=0644
+      when: p.stat.exists is defined and not p.stat.exists
+    - name: Create the file repository configuration
+      ansible.builtin.lineinfile:
+        path: /etc/apt/sources.list.d/pgdg.list
+        line: 'deb http://apt.postgresql.org/pub/repos/apt {{ ansible_distribution_release }}-pgdg main'
+        state: present
+    - name: Import the repository signing key
+      shell: wget --quiet -O - https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo apt-key add -
+    - name: Update the package lists
+      apt:
+        update_cache: yes
+        name:
+          - postgresql-{{ pg_ver }}
+          - python3-pip
+        state: present
+    - name: install psycopg2-binary
+      pip:
+        name: psycopg2-binary

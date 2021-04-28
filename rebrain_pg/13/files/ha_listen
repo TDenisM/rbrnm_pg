@@ -1,0 +1,5 @@
+listen stats
+	mode http
+	bind *:32700
+	stats enable
+	stats uri /

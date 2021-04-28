@@ -1,0 +1,382 @@
+version: '3.8'
+
+services:
+  node_exporter:
+    image: quay.io/prometheus/node-exporter:latest
+    command:
+      - '--path.rootfs=/host'
+    pid: host
+    volumes:
+      - '/:/host:ro,rslave'
+    deploy:
+      mode: global
+    networks:
+      - net
+    hostname: "{{.Node.Hostname}}"
+
+  prometheus:
+    image: prom/prometheus
+    networks:
+      - net
+    ports:
+      - 9090:9090
+    configs:
+      - source: prometheus.yml
+        target: /etc/prometheus/prometheus.yml
+        uid: '65534'
+        gid: '65534'
+        mode: 0660
+    deploy:
+      placement:
+        constraints:
+          - node.labels.label == hap
+    hostname: "{{.Node.Hostname}}"
+
+  grafana:
+    image: grafana/grafana
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=rebrain
+    configs:
+      - source: datasource.yml
+        target: /etc/grafana/provisioning/datasources/datasource.yml
+        uid: '472'
+        gid: '0'
+        mode: 0660
+      - source: dashboard_1860.json
+        target: /tmp/dashboard_1860.json
+        uid: '472'
+        gid: '0'
+        mode: 0660
+      - source: dashboard_9628.json
+        target: /tmp/dashboard_9628.json
+        uid: '472'
+        gid: '0'
+        mode: 0660
+      - source: dashboard_1860.yml
+        target: /etc/grafana/provisioning/dashboards/dashboard_1860.yml
+        uid: '472'
+        gid: '0'
+        mode: 0660
+    networks:
+      - net
+    ports:
+      - 3000:3000
+    deploy:
+      placement:
+        constraints:
+          - node.labels.label == hap
+    hostname: "{{.Node.Hostname}}"
+
+  etcd1:
+    image: patroni
+    environment:
+      ETCD_LISTEN_PEER_URLS: http://0.0.0.0:2380
+      ETCD_LISTEN_CLIENT_URLS: http://0.0.0.0:2379
+      ETCD_INITIAL_CLUSTER: etcd1=http://etcd1:2380,etcd2=http://etcd2:2380,etcd3=http://etcd3:2380
+      ETCD_INITIAL_CLUSTER_STATE: new
+      ETCD_INITIAL_CLUSTER_TOKEN: etcd-token
+    command: etcd -name etcd1 -initial-advertise-peer-urls http://etcd1:2380
+    networks:
+      - net
+    deploy:
+      placement:
+        constraints:
+          - node.labels.label == etcd1
+    hostname: "{{.Node.Hostname}}"
+
+  etcd2:
+    image: patroni
+    environment:
+      ETCD_LISTEN_PEER_URLS: http://0.0.0.0:2380
+      ETCD_LISTEN_CLIENT_URLS: http://0.0.0.0:2379
+      ETCD_INITIAL_CLUSTER: etcd1=http://etcd1:2380,etcd2=http://etcd2:2380,etcd3=http://etcd3:2380
+      ETCD_INITIAL_CLUSTER_STATE: new
+      ETCD_INITIAL_CLUSTER_TOKEN: etcd-token
+    command: etcd -name etcd2 -initial-advertise-peer-urls http://etcd2:2380
+    networks:
+      - net
+    deploy:
+      placement:
+        constraints:
+          - node.labels.label == etcd2
+    hostname: "{{.Node.Hostname}}"
+
+  etcd3:
+    image: patroni
+    environment:
+      ETCD_LISTEN_PEER_URLS: http://0.0.0.0:2380
+      ETCD_LISTEN_CLIENT_URLS: http://0.0.0.0:2379
+      ETCD_INITIAL_CLUSTER: etcd1=http://etcd1:2380,etcd2=http://etcd2:2380,etcd3=http://etcd3:2380
+      ETCD_INITIAL_CLUSTER_STATE: new
+      ETCD_INITIAL_CLUSTER_TOKEN: etcd-token
+    command: etcd -name etcd3 -initial-advertise-peer-urls http://etcd3:2380
+    networks:
+      - net
+    deploy:
+      placement:
+        constraints:
+          - node.labels.label == etcd3
+    hostname: "{{.Node.Hostname}}"
+
+  patroni1:
+    image: patroni
+    networks:
+      - net
+    environment:
+#      PATRONI_LOG_LEVEL: DEBUG
+      PATRONI_NAME: patroni1
+    configs:
+      - source: patroni.yml
+        target: /home/postgres/.config/patroni/patronictl.yaml
+        uid: '999'
+        gid: '999'
+        mode: 0660
+    deploy:
+      placement:
+        constraints:
+          - node.labels.label == pat1
+  
+  pg_exporter1:
+    image: wrouesnel/postgres_exporter
+    networks:
+      - net
+    environment:
+      DATA_SOURCE_NAME: postgresql://admin:admin@patroni1:5432/postgres?sslmode=disable
+#    deploy:
+#      placement:
+#        constraints:
+#          - node.labels.label == pat1
+
+  pg_exporter2:
+    image: wrouesnel/postgres_exporter
+    networks:
+      - net
+    environment:
+      DATA_SOURCE_NAME: postgresql://admin:admin@patroni2:5432/postgres?sslmode=disable
+#    deploy:
+#      placement:
+#        constraints:
+#          - node.labels.label == pat2
+
+  pg_exporter3:
+    image: wrouesnel/postgres_exporter
+    networks:
+      - net
+    environment:
+      DATA_SOURCE_NAME: postgresql://admin:admin@patroni3:5432/postgres?sslmode=disable
+#    deploy:
+#      placement:
+#        constraints:
+#          - node.labels.label == pat3
+
+  pg_exporter4:
+    image: wrouesnel/postgres_exporter
+    networks:
+      - net
+    environment:
+      DATA_SOURCE_NAME: postgresql://admin:admin@patroni4:5432/postgres?sslmode=disable
+#    deploy:
+#      placement:
+#        constraints:
+#          - node.labels.label == pat4
+
+  patroni2:
+    image: patroni
+    networks:
+      - net
+    environment:
+      PATRONI_NAME: patroni2
+    configs:
+      - source: patroni.yml
+        target: /home/postgres/.config/patroni/patronictl.yaml
+        uid: '999'
+        gid: '999'
+        mode: 0660
+    deploy:
+      placement:
+        constraints:
+          - node.labels.label == pat2
+
+  patroni3:
+    image: patroni
+    networks:
+      - net
+    environment:
+      PATRONI_NAME: patroni3
+    configs:
+      - source: patroni.yml
+        target: /home/postgres/.config/patroni/patronictl.yaml
+        uid: '999'
+        gid: '999'
+        mode: 0660
+    deploy:
+      placement:
+        constraints:
+          - node.labels.label == pat3
+
+  patroni4:
+    image: patroni
+    networks:
+      - net
+    environment:
+      PATRONI_NAME: patroni4
+    configs:
+      - source: patroni4.yml
+        target: /home/postgres/.config/patroni/patronictl.yaml
+        uid: '999'
+        gid: '999'
+        mode: 0660
+    deploy:
+      placement:
+        constraints:
+          - node.labels.label == pat4
+
+#  pg_exporter:
+#    image: wrouesnel/postgres_exporter
+#    networks:
+#      - net
+#    network_mode: host
+#    ports:
+#      - 9187:9187
+#    environment:
+##      DATA_SOURCE_NAME: postgresql://admin:admin@localhost:5432/postgres?sslmode=disable
+#    deploy:
+#      mode: global
+##      placement:
+#        constraints:
+#          - node.labels.type == postgres
+ 
+  confd1:
+    image: confd
+    networks:
+      - net
+    volumes:
+      - pgb:/etc/pgbouncer/
+    depends_on:
+      - pgb1
+    healthcheck:
+      test: ["CMD", "pg_isready", "-h", "pgb1", "-p", "6432" ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    restart: on-failure
+    deploy:
+      placement:
+        constraints:
+          - node.labels.label == pgb1
+
+  confd2:
+    image: confd
+    networks:
+      - net
+    volumes:
+      - pgb:/etc/pgbouncer/
+    depends_on:
+      - pgb2
+    healthcheck:
+      test: ["CMD", "pg_isready", "-h", "pgb1", "-p", "6432" ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    restart: on-failure
+    deploy:
+      placement:
+        constraints:
+          - node.labels.label == pgb2
+
+  pgb1:
+    image: pgbouncer
+    networks:
+      - net
+    volumes:
+      - pgb:/etc/pgbouncer/
+    depends_on:
+      - confd1
+      - patroni1
+      - patroni2
+      - patroni3
+    healthcheck:
+      test: ["CMD", "pg_isready", "-h", "localhost", "-p", "6432" ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    deploy:
+      placement:
+        constraints:
+          - node.labels.label == pgb1
+  pgb2:
+    image: pgbouncer
+    networks:
+      - net
+    volumes:
+      - pgb:/etc/pgbouncer/
+    depends_on:
+      - confd2
+      - patroni1
+      - patroni2
+      - patroni3
+    healthcheck:
+      test: ["CMD", "pg_isready", "-h", "localhost", "-p", "6432" ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    deploy:
+      placement:
+        constraints:
+          - node.labels.label == pgb2
+
+  hap:
+    image: haproxy
+    networks:
+      - net
+    ports:
+      - 6432:6432
+      - 7000:7000
+    configs:
+      - source: haproxy.cfg
+        target: /usr/local/etc/haproxy/haproxy.cfg
+        uid: '0'
+        gid: '0'
+        mode: 0640
+    deploy:
+      placement:
+        constraints:
+          - node.labels.label == hap
+    restart: on-failure
+    depends_on:
+      - pgb1
+      - pgb2
+      - etcd1
+      - etcd2
+      - etcd3
+      - patroni1
+      - patroni2
+      - patroni3
+      - patroni4
+      - confd1
+      - confd2
+
+networks:
+  net:
+
+configs:
+  prometheus.yml:
+    external: true
+  datasource.yml:
+    external: true
+  dashboard_1860.json:
+    external: true
+  dashboard_9628.json:
+    external: true
+  dashboard_1860.yml:
+    external: true
+  patroni.yml:
+    external: true
+  patroni4.yml:
+    external: true
+  haproxy.cfg:
+    external: true
+
+volumes:
+  pgb:
+    external: true

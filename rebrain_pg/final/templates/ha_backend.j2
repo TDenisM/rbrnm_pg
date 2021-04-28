@@ -1,0 +1,5 @@
+backend bk_db
+	option httpchk
+	mode tcp
+{% set id = namespace(value=1) %}{% for ip in patroni_nodes_ips %}	server rebrain_patroni_node_{{ id.value }} {{ ip }}:5432 maxconn 100 check port 8008
+{% set id.value = id.value + 1 %}{% endfor %}

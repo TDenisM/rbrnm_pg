@@ -1,0 +1,15 @@
+[template]
+prefix = "/service/batman"
+owner = "postgres"
+mode = "0644"
+src = "pgbouncer.ini.tmpl"
+dest = "/etc/pgbouncer/pgbouncer.ini"
+
+reload_cmd = "/etc/confd/conf.d/pgb_update.sh"
+#reload_cmd = "psql postgres://pgbouncer:pgbouncer@pgb{{ ansible_hostname[-1] }}:6432/pgbouncer -c 'RELOAD'" 
+#reload_cmd = "psql postgres://pgbouncer:pgbouncer@pgb{{ ansible_hostname[-1] }}:6432/pgbouncer -c 'RELOAD' -c 'KILL postgres' -c 'RESUME postgres' > /dev/stdout"
+# 2>/dev/null"
+
+keys = [
+    "/members/","/leader"
+]

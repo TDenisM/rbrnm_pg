@@ -1,0 +1,14 @@
+[etcd]
+etcd1 ansible_host=192.168.33.10 ansible_user=vagrant
+etcd2 ansible_host=192.168.33.11 ansible_user=vagrant
+etcd3 ansible_host=192.168.33.12 ansible_user=vagrant
+[patroni]
+pat1 ansible_host=192.168.33.13 ansible_user=vagrant
+pat2 ansible_host=192.168.33.14 ansible_user=vagrant
+pat3 ansible_host=192.168.33.15 ansible_user=vagrant
+pat4 ansible_host=192.168.33.17 ansible_user=vagrant
+[hap]
+hap ansible_host=192.168.33.16 ansible_user=vagrant
+[pgb]
+pgb1 ansible_host=192.168.33.18 ansible_user=vagrant
+pgb2 ansible_host=192.168.33.19 ansible_user=vagrant

@@ -1,0 +1,410 @@
+--
+-- PostgreSQL database dump
+--
+
+-- Dumped from database version 13.2 (Ubuntu 13.2-1.pgdg20.04+1)
+-- Dumped by pg_dump version 13.2 (Ubuntu 13.2-1.pgdg20.04+1)
+
+SET statement_timeout = 0;
+SET lock_timeout = 0;
+SET idle_in_transaction_session_timeout = 0;
+SET client_encoding = 'UTF8';
+SET standard_conforming_strings = on;
+SELECT pg_catalog.set_config('search_path', '', false);
+SET check_function_bodies = false;
+SET xmloption = content;
+SET client_min_messages = warning;
+SET row_security = off;
+
+--
+-- Name: rebrain_portal; Type: SCHEMA; Schema: -; Owner: root
+--
+
+CREATE SCHEMA rebrain_portal;
+
+
+ALTER SCHEMA rebrain_portal OWNER TO root;
+
+SET default_tablespace = '';
+
+SET default_table_access_method = heap;
+
+--
+-- Name: blog; Type: TABLE; Schema: public; Owner: rebrain_admin
+--
+
+CREATE TABLE public.blog (
+    id integer NOT NULL,
+    user_id integer NOT NULL,
+    blog_text text NOT NULL
+);
+
+
+ALTER TABLE public.blog OWNER TO rebrain_admin;
+
+--
+-- Name: blog_id_seq; Type: SEQUENCE; Schema: public; Owner: rebrain_admin
+--
+
+CREATE SEQUENCE public.blog_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER TABLE public.blog_id_seq OWNER TO rebrain_admin;
+
+--
+-- Name: blog_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: rebrain_admin
+--
+
+ALTER SEQUENCE public.blog_id_seq OWNED BY public.blog.id;
+
+
+--
+-- Name: courses; Type: TABLE; Schema: public; Owner: rebrain_admin
+--
+
+CREATE TABLE public.courses (
+    course_id integer NOT NULL,
+    coursename character varying(50) NOT NULL,
+    tasks_count integer NOT NULL,
+    price integer NOT NULL
+);
+
+
+ALTER TABLE public.courses OWNER TO rebrain_admin;
+
+--
+-- Name: courses_course_id_seq; Type: SEQUENCE; Schema: public; Owner: rebrain_admin
+--
+
+CREATE SEQUENCE public.courses_course_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER TABLE public.courses_course_id_seq OWNER TO rebrain_admin;
+
+--
+-- Name: courses_course_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: rebrain_admin
+--
+
+ALTER SEQUENCE public.courses_course_id_seq OWNED BY public.courses.course_id;
+
+
+--
+-- Name: users; Type: TABLE; Schema: public; Owner: rebrain_admin
+--
+
+CREATE TABLE public.users (
+    user_id integer NOT NULL,
+    username character varying(50) NOT NULL,
+    email character varying(50) NOT NULL,
+    mobile_phone character varying(12) NOT NULL,
+    firstname text NOT NULL,
+    lastname text NOT NULL,
+    city text,
+    is_curator boolean NOT NULL,
+    record_date timestamp without time zone DEFAULT now() NOT NULL
+);
+
+
+ALTER TABLE public.users OWNER TO rebrain_admin;
+
+--
+-- Name: users__courses; Type: TABLE; Schema: public; Owner: rebrain_admin
+--
+
+CREATE TABLE public.users__courses (
+    id integer NOT NULL,
+    user_id integer NOT NULL,
+    course_id integer NOT NULL
+);
+
+
+ALTER TABLE public.users__courses OWNER TO rebrain_admin;
+
+--
+-- Name: users__courses_id_seq; Type: SEQUENCE; Schema: public; Owner: rebrain_admin
+--
+
+CREATE SEQUENCE public.users__courses_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER TABLE public.users__courses_id_seq OWNER TO rebrain_admin;
+
+--
+-- Name: users__courses_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: rebrain_admin
+--
+
+ALTER SEQUENCE public.users__courses_id_seq OWNED BY public.users__courses.id;
+
+
+--
+-- Name: users_user_id_seq; Type: SEQUENCE; Schema: public; Owner: rebrain_admin
+--
+
+CREATE SEQUENCE public.users_user_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER TABLE public.users_user_id_seq OWNER TO rebrain_admin;
+
+--
+-- Name: users_user_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: rebrain_admin
+--
+
+ALTER SEQUENCE public.users_user_id_seq OWNED BY public.users.user_id;
+
+
+--
+-- Name: blog id; Type: DEFAULT; Schema: public; Owner: rebrain_admin
+--
+
+ALTER TABLE ONLY public.blog ALTER COLUMN id SET DEFAULT nextval('public.blog_id_seq'::regclass);
+
+
+--
+-- Name: courses course_id; Type: DEFAULT; Schema: public; Owner: rebrain_admin
+--
+
+ALTER TABLE ONLY public.courses ALTER COLUMN course_id SET DEFAULT nextval('public.courses_course_id_seq'::regclass);
+
+
+--
+-- Name: users user_id; Type: DEFAULT; Schema: public; Owner: rebrain_admin
+--
+
+ALTER TABLE ONLY public.users ALTER COLUMN user_id SET DEFAULT nextval('public.users_user_id_seq'::regclass);
+
+
+--
+-- Name: users__courses id; Type: DEFAULT; Schema: public; Owner: rebrain_admin
+--
+
+ALTER TABLE ONLY public.users__courses ALTER COLUMN id SET DEFAULT nextval('public.users__courses_id_seq'::regclass);
+
+
+--
+-- Data for Name: blog; Type: TABLE DATA; Schema: public; Owner: rebrain_admin
+--
+
+COPY public.blog (id, user_id, blog_text) FROM stdin;
+1	1	We are studying at the REBRAIN PostgreSQL Workshop
+\.
+
+
+--
+-- Data for Name: courses; Type: TABLE DATA; Schema: public; Owner: rebrain_admin
+--
+
+COPY public.courses (course_id, coursename, tasks_count, price) FROM stdin;
+1	Kubernetes	70	35000
+2	Highload	130	75000
+3	Bash	15	6900
+4	Golang	117	55000
+5	Linux	102	65000
+6	Devops	212	75000
+7	Docker	45	30000
+8	Logs	14	7900
+9	Postgresql	14	10000
+\.
+
+
+--
+-- Data for Name: users; Type: TABLE DATA; Schema: public; Owner: rebrain_admin
+--
+
+COPY public.users (user_id, username, email, mobile_phone, firstname, lastname, city, is_curator, record_date) FROM stdin;
+1	admin	vasiliy_ozerov@mail.com	+79111937483	Vasiliy	Ozerov	Moscow	t	2012-12-07 04:25:44
+2	pricex	SimonWels@mail.com	+79111974384	Simon	Wels	London	f	2012-12-07 04:25:44
+3	MaytheForcebewithyou	Leya.Organa@newrepublic.com	+79991916526	Leya	Organa	Alderaan	f	2012-12-07 04:25:44
+5	herion1	Sabur03@yandex.ru	+79110983475	Sabur	Gagiev	Kazan	f	2012-12-07 04:25:44
+6	pusha	Liliana_Sal@yandex.ru	+79115897438	Liliana	Salohina	SPB	f	2012-12-07 04:25:44
+7	vierjohn	xen_power@mail.com	+79112232134	John	Seltic	NULL	f	2012-12-07 04:25:44
+8	trakstars	Pronina@mail.ru	+79811987483	Varya	Pronina	Moscow	f	2012-12-07 04:25:44
+9	vozilla	Maxxx@mail.ru	+79111047854	Max	Visikov	NULL	f	2012-12-07 04:25:44
+10	Kisa007	Kisa007@mail.ru	+79112405972	Raya	Simonova	Tver	f	2012-12-07 04:25:44
+11	greenball	maike.greenball.vazovsky@corp.com	+79112425872	Mike	Vazovsky	Monstertown	f	2012-12-07 04:25:44
+12	vladon	Vladislav.Pirushin@gmail.com	+79817937545	Vladislav	Pirushin	\N	t	2021-03-04 13:58:54.610263
+\.
+
+
+--
+-- Data for Name: users__courses; Type: TABLE DATA; Schema: public; Owner: rebrain_admin
+--
+
+COPY public.users__courses (id, user_id, course_id) FROM stdin;
+1	1	1
+2	1	4
+3	3	2
+4	3	4
+5	2	6
+6	2	1
+7	2	2
+8	2	4
+9	5	6
+10	6	6
+11	3	6
+\.
+
+
+--
+-- Name: blog_id_seq; Type: SEQUENCE SET; Schema: public; Owner: rebrain_admin
+--
+
+SELECT pg_catalog.setval('public.blog_id_seq', 1, true);
+
+
+--
+-- Name: courses_course_id_seq; Type: SEQUENCE SET; Schema: public; Owner: rebrain_admin
+--
+
+SELECT pg_catalog.setval('public.courses_course_id_seq', 9, true);
+
+
+--
+-- Name: users__courses_id_seq; Type: SEQUENCE SET; Schema: public; Owner: rebrain_admin
+--
+
+SELECT pg_catalog.setval('public.users__courses_id_seq', 11, true);
+
+
+--
+-- Name: users_user_id_seq; Type: SEQUENCE SET; Schema: public; Owner: rebrain_admin
+--
+
+SELECT pg_catalog.setval('public.users_user_id_seq', 12, true);
+
+
+--
+-- Name: blog blog_pkey; Type: CONSTRAINT; Schema: public; Owner: rebrain_admin
+--
+
+ALTER TABLE ONLY public.blog
+    ADD CONSTRAINT blog_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: courses courses_pkey; Type: CONSTRAINT; Schema: public; Owner: rebrain_admin
+--
+
+ALTER TABLE ONLY public.courses
+    ADD CONSTRAINT courses_pkey PRIMARY KEY (course_id);
+
+
+--
+-- Name: users__courses users__courses_pkey; Type: CONSTRAINT; Schema: public; Owner: rebrain_admin
+--
+
+ALTER TABLE ONLY public.users__courses
+    ADD CONSTRAINT users__courses_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: users users_pkey; Type: CONSTRAINT; Schema: public; Owner: rebrain_admin
+--
+
+ALTER TABLE ONLY public.users
+    ADD CONSTRAINT users_pkey PRIMARY KEY (user_id);
+
+
+--
+-- Name: users__courses fk_course_id; Type: FK CONSTRAINT; Schema: public; Owner: rebrain_admin
+--
+
+ALTER TABLE ONLY public.users__courses
+    ADD CONSTRAINT fk_course_id FOREIGN KEY (course_id) REFERENCES public.courses(course_id);
+
+
+--
+-- Name: users__courses fk_user_id; Type: FK CONSTRAINT; Schema: public; Owner: rebrain_admin
+--
+
+ALTER TABLE ONLY public.users__courses
+    ADD CONSTRAINT fk_user_id FOREIGN KEY (user_id) REFERENCES public.users(user_id);
+
+
+--
+-- Name: blog fk_user_id; Type: FK CONSTRAINT; Schema: public; Owner: rebrain_admin
+--
+
+ALTER TABLE ONLY public.blog
+    ADD CONSTRAINT fk_user_id FOREIGN KEY (user_id) REFERENCES public.users(user_id);
+
+
+--
+-- Name: SCHEMA public; Type: ACL; Schema: -; Owner: postgres
+--
+
+GRANT USAGE ON SCHEMA public TO rebrain_admin;
+GRANT USAGE ON SCHEMA public TO rebrain_group_select_access;
+
+
+--
+-- Name: SCHEMA rebrain_portal; Type: ACL; Schema: -; Owner: root
+--
+
+GRANT ALL ON SCHEMA rebrain_portal TO rebrain_portal;
+
+
+--
+-- Name: TABLE blog; Type: ACL; Schema: public; Owner: rebrain_admin
+--
+
+GRANT SELECT ON TABLE public.blog TO backup;
+GRANT SELECT ON TABLE public.blog TO rebrain_group_select_access;
+
+
+--
+-- Name: TABLE courses; Type: ACL; Schema: public; Owner: rebrain_admin
+--
+
+GRANT SELECT ON TABLE public.courses TO rebrain_group_select_access;
+
+
+--
+-- Name: TABLE users; Type: ACL; Schema: public; Owner: rebrain_admin
+--
+
+GRANT SELECT ON TABLE public.users TO rebrain_group_select_access;
+
+
+--
+-- Name: TABLE users__courses; Type: ACL; Schema: public; Owner: rebrain_admin
+--
+
+GRANT SELECT ON TABLE public.users__courses TO rebrain_group_select_access;
+
+
+--
+-- Name: DEFAULT PRIVILEGES FOR TABLES; Type: DEFAULT ACL; Schema: public; Owner: rebrain_admin
+--
+
+ALTER DEFAULT PRIVILEGES FOR ROLE rebrain_admin IN SCHEMA public REVOKE ALL ON TABLES  FROM rebrain_admin;
+ALTER DEFAULT PRIVILEGES FOR ROLE rebrain_admin IN SCHEMA public GRANT SELECT ON TABLES  TO backup;
+
+
+--
+-- PostgreSQL database dump complete
+--
+

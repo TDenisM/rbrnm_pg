@@ -1,0 +1,13 @@
+- name: Check resuls
+  hosts: u20
+  become: yes
+  tasks:
+    - name: Get postgres verion
+      ansible.builtin.package_facts:
+      register: pg_ver
+    - name: PG verion check
+      debug:
+        msg: '{{ pg_ver.ansible_facts.packages["postgresql-12"] }}'
+    - name: Messgae
+      debug:
+        msg: '!!!Message!!!'

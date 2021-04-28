@@ -1,0 +1,6 @@
+- name: test
+  hosts: rhm
+  gather_facts: yes
+  tasks:
+    - debug:
+        msg: '{{ hostvars.rhm.ansible_host }}'

@@ -1,0 +1,51 @@
+1. Установить postgresql 13 через пакетный менеджер.
+2. Добавьте в PostgreSQL пользователя root c правами SUPERUSER.
+3. Установить pgbench.
+4. Создайте бд pgbench.
+5. Создайте таблицы для работы pgbench с помощью:
+
+pgbench --initialize --scale=100 pgbench
+
+
+6. Fsync - по умолчанию режим включен. Он гарантирует, что база данных сможет восстановиться после аппаратного сбоя, поскольку данные физически записаны на диск.
+Рассмотрим влияния fsync, для этого на сервере в каталоге /opt подготовлен скрипт task11.sql
+Выполнить pgbench, чтобы узнать базовую - дефолтную производительность системы.
+
+pgbench -t 1000 -c 15 -f task11.sql -n pgbench
+
+
+7. Сохраните результат в /opt/result_1.txt
+8. Выключите fsync на сервере баз данных:
+
+psql -U postgres << EOF
+ALTER SYSTEM RESET ALL;
+ALTER SYSTEM SET fsync to off;
+EOF
+
+
+9. Перезапустите postgressql.
+10. Выполните повторно pgbench -t 1000 -c 15 -f task11.sql -n pgbench.
+11. Сохраните результат в /opt/result_2.txt.
+12. Оцените влияние параметров synchronous_commit и commit_delay, для этого выполните запрос.
+
+psql -U postgres << EOF
+ALTER SYSTEM RESET ALL;
+ALTER SYSTEM SET synchronous_commit to off;
+ALTER SYSTEM SET commit_delay to 100000;
+EOF
+
+
+13. Перезапустите postgressql.
+14. Выполните повторно pgbench -t 1000 -c 15 -f task11.sql -n pgbench.
+15. Сохраните результат в /opt/result_3.txt.
+16. Изменить параметр по умолчанию max_connections до 32, тем самым Вы сможете увеличить параметр work_mem.
+17. Изменить параметр по умолчанию shared_buffers до 256MB.
+18. Задать параметр work_mem до 16MB.
+19. Перезапустите postgressql.
+20. Проанализируйте запрос с сортировкой и посмотрите, производится ли сортировка в памяти или на диске:
+
+EXPLAIN ANALYZE SELECT n FROM generate_series(1,5) as foo(n) order by n;
+
+
+21. Задать параметр random_page_cost с дефолтным значением.
+22. Если уверены, что все выполнили правильно, оправляйте задание на проверку.

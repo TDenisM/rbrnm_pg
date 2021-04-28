@@ -1,0 +1,6 @@
+#!/bin/sh
+psql postgres://pgbouncer:pgbouncer@pgb{{ ansible_hostname[-1] }}:6432/pgbouncer -c 'RELOAD'
+sleep 3
+psql postgres://pgbouncer:pgbouncer@pgb{{ ansible_hostname[-1] }}:6432/pgbouncer -c 'KILL postgres'
+sleep 3
+psql postgres://pgbouncer:pgbouncer@pgb{{ ansible_hostname[-1] }}:6432/pgbouncer -c 'RESUME postgres'

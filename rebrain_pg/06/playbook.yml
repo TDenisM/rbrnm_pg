@@ -1,0 +1,323 @@
+- name: Base
+  hosts: all
+  become: true
+#  strategy: free
+  gather_facts: no
+  vars:
+    - pg_ver: 13
+  tasks:
+    - name: Install repo
+      yum:
+        name:
+          - https://download.postgresql.org/pub/repos/yum/reporpms/EL-7-x86_64/pgdg-redhat-repo-latest.noarch.rpm
+        state: latest
+    - name: Install packages
+      yum:
+        name:
+          - postgresql{{ pg_ver }}-server
+          - firewalld
+          - python3
+          - python3-pip
+        state: latest
+        update_cache: yes
+    - name: Start firewalld
+      service:
+        name: firewalld
+        state: started
+    - name: Check initdb
+      stat:
+        path: /var/lib/pgsql/{{ pg_ver }}/data/pg_hba.conf
+      register: initdb_stat
+    - name: Run initdb
+      shell: /usr/pgsql-13/bin/postgresql-{{ pg_ver }}-setup initdb
+      when: initdb_stat.stat.exists == false
+    - name: Enable and start service
+      systemd:
+        name: postgresql-{{ pg_ver }}
+        enabled: yes
+        state: started
+    - name: trust postgres connections
+      lineinfile:
+        path: /var/lib/pgsql/{{ pg_ver }}/data/pg_hba.conf
+        line: 'host all postgres 0.0.0.0/0 trust'
+        state: present
+      notify:
+        - Restart PostgreSQL
+    - name: trust postgres replication connections
+      lineinfile:
+        path: /var/lib/pgsql/{{ pg_ver }}/data/pg_hba.conf
+        line: 'host replication postgres 0.0.0.0/0 trust'
+        state: present
+      notify:
+        - Restart PostgreSQL
+    - name: trust socket connections
+      lineinfile:
+        path: /var/lib/pgsql/{{ pg_ver }}/data/pg_hba.conf
+        regexp: 'local\s+all\s+all\s+peer'
+        line: 'local  all  all  trust'
+        state: present
+      notify:
+        - Restart PostgreSQL
+    - name: allow all interfaces
+      lineinfile:
+        path: /var/lib/pgsql/{{ pg_ver }}/data/postgresql.conf
+        regexp: "^#listen_addresses = 'localhost'"
+        line: "listen_addresses = '*'"
+      notify:
+        - Restart PostgreSQL
+    - name: Open port 5432/tcp
+      firewalld:
+        service: postgresql
+        zone: public
+        permanent: yes
+        state: enabled
+        immediate: yes
+  handlers:
+    - name: Restart PostgreSQL
+      become: yes
+      shell: systemctl restart postgresql-{{ pg_ver }}.service
+      listen: "Restart PostgreSQL"
+
+- name: Master setup
+  hosts: rhm
+  become: true
+  gather_facts: no
+  vars:
+    - pg_ver: 13
+  tasks:
+    - name: Set logs path
+      lineinfile:
+        path: /var/lib/pgsql/{{ pg_ver }}/data/postgresql.conf
+        regexp: "log_directory = 'log'\\s+# directory where log files are written,"
+        line: "log_directory = '/var/log'              # directory where log files are written,"
+      notify:
+        - Restart PostgreSQL
+    - name: Set log file name
+      lineinfile:
+        path: /var/lib/pgsql/{{ pg_ver }}/data/postgresql.conf
+        regexp: "^log_filename = 'postgresql-%a.log'\\s+# log file name pattern,"
+        line: "log_filename = 'postgresql.log'         # log file name pattern,"
+      notify:
+        - Restart PostgreSQL
+    - name: Set rotation size
+      lineinfile:
+        path: /var/lib/pgsql/{{ pg_ver }}/data/postgresql.conf
+        regexp: "log_rotation_size = 0                   # Automatic rotation of logfiles will"
+        line: "log_rotation_size = 100MB                   # Automatic rotation of logfiles will"
+      notify:
+        - Restart PostgreSQL
+    - name: Set client min messages
+      lineinfile:
+        path: /var/lib/pgsql/{{ pg_ver }}/data/postgresql.conf
+        regexp: "#client_min_messages = notice           # values in order of decreasing detail:"
+        line: "client_min_messages = notice           # values in order of decreasing detail:"
+      notify:
+        - Restart PostgreSQL
+    - name: Set log min messages
+      lineinfile:
+        path: /var/lib/pgsql/{{ pg_ver }}/data/postgresql.conf
+        regexp: "#log_min_messages = warning             # values in order of decreasing detail:"
+        line: "log_min_messages = warning             # values in order of decreasing detail:"
+      notify:
+        - Restart PostgreSQL
+    - name: Set min error
+      lineinfile:
+        path: /var/lib/pgsql/{{ pg_ver }}/data/postgresql.conf
+        regexp: "#log_min_error_statement = error        # values in order of decreasing detail:"
+        line: "log_min_error_statement = error        # values in order of decreasing detail:"
+      notify:
+        - Restart PostgreSQL
+    - name: Set log checkpoints
+      lineinfile:
+        path: /var/lib/pgsql/{{ pg_ver }}/data/postgresql.conf
+        regexp: "#log_checkpoints = off"
+        line: "log_checkpoints = on"
+      notify:
+        - Restart PostgreSQL
+    - name: Set log connections
+      lineinfile:
+        path: /var/lib/pgsql/{{ pg_ver }}/data/postgresql.conf
+        regexp: "#log_connections = off"
+        line: "log_connections = on"
+      notify:
+        - Restart PostgreSQL
+    - name: Set log disconnections
+      lineinfile:
+        path: /var/lib/pgsql/{{ pg_ver }}/data/postgresql.conf
+        regexp: "#log_disconnections = off"
+        line: "log_disconnections = on"
+      notify:
+        - Restart PostgreSQL
+    - name: Set log hostname
+      lineinfile:
+        path: /var/lib/pgsql/{{ pg_ver }}/data/postgresql.conf
+        regexp: "#log_hostname = off"
+        line: "log_hostname = on"
+      notify:
+        - Restart PostgreSQL
+#WHy???
+    - name: Set line prefix
+      lineinfile:
+        path: /var/lib/pgsql/{{ pg_ver }}/data/postgresql.conf
+        regexp: "log_line_prefix = '%m [%p] '            # special values:"
+        line: "log_line_prefix = '%t'            # special values:"
+      notify:
+        - Restart PostgreSQL
+    - name: Create postgresql.conf and set permissions
+      file:
+        path: /var/log/postgresql.log
+        state: touch
+        mode: a-r,u+r
+        owner: postgres
+        group: postgres
+      notify:
+        - Restart PostgreSQL
+    - name: Set WAL level
+      lineinfile:
+        path: /var/lib/pgsql/{{ pg_ver }}/data/postgresql.conf
+        regexp: "#wal_level = replica\\s+# minimal, replica, or logical"
+        line: "wal_level = replica                     # minimal, replica, or logical"
+      notify:
+        - Restart PostgreSQL
+    - name: Set WAL hints on
+      lineinfile:
+        path: /var/lib/pgsql/{{ pg_ver }}/data/postgresql.conf
+        regexp: "#wal_log_hints = off                    # also do full page writes of non-critical updates"
+        line: "wal_log_hints = on                      # also do full page writes of non-critical updates"
+      notify:
+        - Restart PostgreSQL
+    - name: Set WAL senders
+      lineinfile:
+        path: /var/lib/pgsql/{{ pg_ver }}/data/postgresql.conf
+        regexp: "#max_wal_senders = 10           # max number of walsender processes"
+        line: "max_wal_senders = 2           # max number of walsender processes"
+      notify:
+        - Restart PostgreSQL
+    - name: Set replication slots
+      lineinfile:
+        path: /var/lib/pgsql/{{ pg_ver }}/data/postgresql.conf
+        regexp: "#max_replication_slots = 10     # max number of replication slots"
+        line: "max_replication_slots = 1     # max number of replication slots"
+      notify:
+        - Restart PostgreSQL
+    - name: Set WAL keep size
+      lineinfile:
+        path: /var/lib/pgsql/{{ pg_ver }}/data/postgresql.conf
+        regexp: "#wal_keep_size = 0              # in megabytes; 0 disables"
+        line: "wal_keep_size = 100              # in megabytes; 0 disables"
+      notify:
+        - Restart PostgreSQL
+    - name: Set archive mode
+      lineinfile:
+        path: /var/lib/pgsql/{{ pg_ver }}/data/postgresql.conf
+        regexp: "#archive_mode = off             # enables archiving; off, on, or always"
+        line: "archive_mode = on             # enables archiving; off, on, or always"
+      notify:
+        - Restart PostgreSQL
+  handlers:
+    - name: Restart PostgreSQL
+      become: yes
+      shell: systemctl restart postgresql-{{ pg_ver }}.service
+      listen: "Restart PostgreSQL"
+
+- name: SSH keys
+  hosts: all
+  become: true
+  become_user: postgres
+  strategy: free
+  gather_facts: no
+  tasks:
+    - name: Create .ssh dir
+      file:
+        path: /var/lib/pgsql/.ssh
+#        path: /root/.ssh
+        state: directory
+        mode: '0700'
+    - name: Copy keys
+      copy:
+        src: '{{ item }}'
+        dest: /var/lib/pgsql/.ssh/
+#        dest: /root/.ssh/
+        mode: '0700'
+      with_items:
+        - id_rsa
+        - id_rsa.pub
+    - name: Register pub key
+      shell: cat /var/lib/pgsql/.ssh/id_rsa.pub
+#      shell: cat /root/.ssh/id_rsa.pub
+      register: pub_key
+    - name: Add key to authorised_keys
+      lineinfile:
+        path: /var/lib/pgsql/.ssh/authorized_keys
+#        path: /root/.ssh/authorized_keys
+        line: '{{ pub_key.stdout }}'
+        create: yes
+        state: present
+
+- name: Set master parameters
+  become: true
+  hosts: rhm
+  gather_facts: no
+  tasks:
+    - name: Set hostname
+      hostname:
+        name: master
+
+- name: Set slave parameters
+  become: true
+  hosts: rhs
+  gather_facts: yes
+  vars:
+    - pg_ver: 13
+  tasks:
+    - name: Set hostname
+      hostname:
+        name: slave
+    - name: Create postgresql.conf and set permissions
+      file:
+        path: /var/log/postgresql.log
+        state: touch
+        mode: a-r,u+r
+        owner: postgres
+        group: postgres
+      notify:
+        - Restart PostgreSQL
+    - name: Stop slave pgsql
+      service:
+        name: postgresql-{{ pg_ver }}
+        state: stopped
+    - name: Delete all data
+      shell: rm -rf /var/lib/pgsql/{{ pg_ver }}/data/*
+    - name: Sync master data
+      become_user: postgres
+      shell: pg_basebackup -h {{ hostvars.rhm.ansible_host }} -U postgres -p 5432 -D /var/lib/pgsql/{{ pg_ver }}/data -Fp -Xs -P -R
+    - name: Set hot_standby parameter
+      lineinfile:
+        path: /var/lib/pgsql/{{ pg_ver }}/data/postgresql.conf
+        regexp: '#hot_standby = on                       # "off" disallows queries during recovery'
+        line: 'hot_standby = on                       # "off" disallows queries during recovery'
+      notify:
+        - Restart PostgreSQL
+  handlers:
+    - name: Restart PostgreSQL
+      become: yes
+      shell: systemctl restart postgresql-{{ pg_ver }}.service
+      listen: "Restart PostgreSQL"
+
+- name: Import data
+  hosts: rhm
+  become: yes
+  become_user: postgres
+  tasks:
+    - name: Import schema
+      shell: psql < /opt/schema.sql
+    - name: Import data
+      shell: psql < /opt/data.sql
+    - name: Get schema
+      fetch:
+        src: /opt/schema.sql
+        dest: ./
+    - name: Get data
+      fetch:
+        src: /opt/data.sql
+        dest: ./

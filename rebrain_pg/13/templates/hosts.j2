@@ -1,0 +1,6 @@
+127.0.0.1	localhost
+{% set id = namespace(value=1) %}
+{% for ip in etcd_nodes_ips %}
+{{ ip }}	rebrain-etcd-node-{{ id.value }}
+{% set id.value = id.value + 1 %}
+{% endfor %}

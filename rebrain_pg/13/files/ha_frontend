@@ -1,0 +1,4 @@
+frontend ft_postgresql
+	bind *:5432
+	mode tcp
+	default_backend bk_db

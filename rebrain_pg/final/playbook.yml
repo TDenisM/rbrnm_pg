@@ -1,0 +1,377 @@
+- name: Prepare hosts
+  hosts: all
+  become: no
+  gather_facts: no
+  tasks:
+    - name: Wait for port 22 to become open and contain "OpenSSH"
+      become: no
+      wait_for:
+        port: 22
+        host: '{{ (ansible_ssh_host|default(ansible_host))|default(inventory_hostname) }}'
+        search_regex: OpenSSH
+      connection: local
+
+- name: prepare
+  hosts: all
+  become: yes
+  tasks:
+    - name: set host names
+      hostname:
+        name: '{{ inventory_hostname }}'
+
+- name: Docker
+  hosts: all
+  become: yes
+  tasks:
+    - name: get installation script
+      get_url:
+        url: https://get.docker.com
+        dest: ./get-docker.sh
+        owner: '{{ ansible_user }}'
+        mode: '0555'
+    - name: exec install script
+      shell: ./get-docker.sh
+      retries: 5
+      delay: 10
+      args:
+        creates: /usr/bin/docker
+    - name: install additional modules
+      apt:
+        name:
+          - python3-pip
+    - name: install python modules
+      pip:
+        name:
+          - docker
+          - jsondiff
+
+- name: Init swarm
+  hosts: hap
+  become: yes
+  tasks:
+    - name: init swarm manager
+      docker_swarm:
+        state: present
+        advertise_addr: '{{ ansible_host }}'
+      register: swarm
+    - name: remove stack
+      docker_stack:
+        state: absent
+        name: final_task
+    - name: Wait fot stack to be deleted
+      become: no
+      wait_for:
+        timeout: 30
+      delegate_to: localhost
+    - name: label leader
+      docker_node:
+        hostname: '{{ ansible_hostname }}'
+        labels:
+          label: '{{ ansible_hostname }}'
+    - name: copy docker-compose
+      copy:
+        src: files/docker-compose.yml
+        dest: ./docker-compose.yml
+    - name: delete prometheus config
+      docker_config:
+        name: prometheus.yml
+        state: absent
+    - name: create prometheus config
+      docker_config:
+        name: prometheus.yml
+        data: '{{ lookup("template", "files/prometheus/prometheus.yml.j2") | b64encode }}'
+        data_is_b64: true
+        state: present
+    - name: delete patroni config
+      docker_config:
+        name: patroni.yml
+        state: absent
+    - name: create patroni config
+      docker_config:
+        name: patroni.yml
+        data: '{{ lookup("file", "files/patroni/postgres0.yml") | b64encode }}'
+        data_is_b64: true
+        state: present
+    - name: delete patroni4 config
+      docker_config:
+        name: patroni4.yml
+        state: absent
+    - name: create patroni4 config
+      docker_config:
+        name: patroni4.yml
+        data: '{{ lookup("file", "files/patroni/postgres4.yml") | b64encode }}'
+        data_is_b64: true
+        state: present
+    - name: delete grafana prometheus datasource
+      docker_config:
+        name: datasource.yml
+        state: absent
+    - name: create grafana prometheus datasource
+      docker_config:
+        name: datasource.yml
+        data: '{{ lookup("file", "files/grafana/grafana_datasource_prometheus.yml") | b64encode }}'
+        data_is_b64: true
+        state: present
+    - name: delete grafana node exporter dashboard json
+      docker_config:
+        name: dashboard_1860.json
+        state: absent
+    - name: create grafana node exporter dashboard json
+      docker_config:
+        name: dashboard_1860.json
+        data: '{{ lookup("file", "files/grafana/Node Exporter Full.json") | b64encode }}'
+        data_is_b64: true
+        state: present
+    - name: create postges nod exporter dashboard json
+      docker_config:
+        name: dashboard_9628.json
+        data: '{{ lookup("file", "files/grafana/PostgreSQL Database.json") | b64encode }}'
+        data_is_b64: true
+        state: present
+    - name: delete grafana node exporter dashboard
+      docker_config:
+        name: dashboard_1860.yml
+        state: absent
+    - name: create grafana node exporter dashboard
+      docker_config:
+        name: dashboard_1860.yml
+        data: '{{ lookup("file", "files/grafana/grafana_dashboard_1860.yml") | b64encode }}'
+        data_is_b64: true
+        state: present
+    - name: delete haproxy config
+      docker_config:
+        name: haproxy.cfg
+        state: absent
+    - name: create haproxy config
+      shell: echo '{{ lookup("file", "files/haproxy/haproxy.cfg") }}' | docker config create haproxy.cfg -
+#      docker_config:
+#        name: haproxy.cfg
+#        data: '{{ lookup("file", "files/haproxy/haproxy.cfg") | b64encode }}'
+#        data_is_b64: true
+#        data: '{{ lookup("file", "files/haproxy/haproxy.cfg") }}'
+#        state: present
+    - name: create overlay network
+      docker_network:
+        name: net
+        driver: overlay
+        force: yes
+        ipam_config:
+          - subnet: 172.3.27.0/24
+            gateway: 172.3.27.2
+
+- name: Add workers
+  hosts:
+    - etcd
+    - patroni
+    - pgb
+  become: yes
+  tasks:
+    - name: join workers
+      docker_swarm:
+        state: join
+        advertise_addr: '{{ ansible_host }}'
+        remote_addrs: '{{ hostvars["hap"]["ansible_host"] }}'
+        join_token: '{{ hostvars["hap"]["swarm"]["swarm_facts"]["JoinTokens"]["Worker"] }}'
+
+- name: Label workers
+  hosts: hap
+  become: yes
+  tasks:
+    - name: label workers
+      docker_node:
+        hostname: '{{ item }}'
+        labels:
+          label: '{{ item }}'
+      with_items: '{{ groups["etcd"] + groups["patroni"] + groups["pgb"] }}'
+
+- name: Label postgres nodes
+  hosts: hap
+  become: yes
+  tasks:
+    - name: label workers
+      docker_node:
+        hostname: '{{ item }}'
+        labels:
+          type: postgres
+      with_items: '{{ groups["patroni"] }}'
+
+- name: etcd
+  hosts: etcd
+  become: yes
+  tasks:
+    - name: Clone patroni pero
+      git:
+        repo: https://github.com/zalando/patroni.git
+        dest: patroni
+        force: yes
+    - name: build image
+      docker_image:
+        name: patroni
+        build:
+          path: patroni
+        source: build
+
+- name: Patroni
+  hosts: patroni
+  become: yes
+  vars:
+    - pg_ver: 13
+  tasks:
+    - name: delete old patroni folder
+      file:
+        path: patroni
+        state: absent
+    - name: prune system
+      docker_prune:
+        containers: yes
+        images: yes
+        networks: yes
+        volumes: yes
+        builder_cache: yes
+    - name: Clone patroni pero
+      git:
+        repo: https://github.com/zalando/patroni.git
+        dest: patroni
+        force: yes
+    - name: set pg vestion
+      lineinfile:
+        path: patroni/Dockerfile
+        regexp: '^ARG PG_MAJOR=.+'
+        line: 'ARG PG_MAJOR={{ pg_ver }}'
+    - name: copy config
+      copy:
+        src: files/patroni/postgres0.yml
+        dest: patroni/postgres0.yml
+    - name: build image
+      docker_image:
+        name: patroni
+        build:
+          path: patroni
+        source: build
+
+- name: PGbouncer + confd
+  hosts: pgb
+  become: yes
+  vars:
+    - confd_ver: 0.16.0
+    - pgbouncer_ver: 1.15.0
+  tasks:
+    - name: delete existing confd folder
+      file:
+        path: confd
+        state: absent
+    - name: copy data
+      copy:
+        src: files/confd
+        dest: .
+#    - name: copy config template
+#      template:
+#        src: files/pgbouncer.toml.j2
+#        dest: confd/conf.d/pgbouncer.toml
+    - name: copy reload script
+      template:
+        src: files/pgb_update.sh.j2
+        dest: confd/conf.d/pgb_update.sh
+    - name: set entrypoint executable
+      file:
+        path: confd/entrypoint.sh
+        mode: '0750'
+    - name: delete docker image
+      docker_image:
+        name: confd
+        state: absent
+    - name: build confd image
+      docker_image:
+        name: confd
+        build:
+          path: confd
+        source: build
+    - name: delete existing pgbouncer folder
+      file:
+        path: pgbouncer
+        state: absent
+    - name: copy data
+      copy:
+        src: files/pgbouncer
+        dest: .
+    - name: set entrypoint executable
+      file:
+        path: pgbouncer/entrypoint.sh
+        mode: '0750'
+    - name: delete docker image
+      docker_image:
+        name: pgbouncer
+        state: absent
+    - name: build confd image
+      docker_image:
+        name: pgbouncer
+        build:
+          path: pgbouncer
+        source: build
+
+- name: hap test
+  hosts: hap
+  become: yes
+  tasks:
+    - name: copy config
+      copy:
+        src: files/haproxy/haproxy.cfg
+        dest: /tmp/haproxy.cfg
+        mode: '0666'
+          
+- name: Deploy
+  hosts: hap
+  become: yes
+  tasks:
+    - name: copy docker-compose
+      copy:
+        src: files/docker-compose-{{ item }}.yml
+        dest: .
+      with_items:
+        - 1
+        - 2
+        - 3
+    - name: deploy p1
+      docker_stack:
+        state: present
+        name: final_task
+        compose:
+          - ./docker-compose-1.yml
+    - name: wait
+      become: no
+      wait_for:
+        timeout: 30
+      delegate_to: localhost
+    - name: deploy p2
+      docker_stack:
+        state: present
+        name: final_task
+        compose:
+          - ./docker-compose-2.yml
+    - name: wait
+      become: no
+      wait_for:
+        timeout: 30
+      delegate_to: localhost
+    - name: deploy p3
+      docker_stack:
+        state: present
+        name: final_task
+        compose:
+          - ./docker-compose-3.yml
+
+- name: db maintenance
+  hosts: hap
+  become: yes
+  tasks:
+    - name: install postgres client
+      apt:
+        update_cache: yes
+        name:
+          - postgresql-client
+          - postgresql-contrib
+          - python3-pip
+        state: latest
+    - name: install psycopg2-binary
+      pip:
+        name: psycopg2-binary

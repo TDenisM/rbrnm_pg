@@ -1,0 +1,48 @@
+version: '3.8'
+
+services:
+  confd1:
+    image: confd
+    networks:
+      - net
+    volumes:
+      - pgb:/etc/pgbouncer/
+    depends_on:
+      - pgb1
+    healthcheck:
+      test: ["CMD", "pg_isready", "-h", "pgb1", "-p", "6432" ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    restart: on-failure
+    deploy:
+      placement:
+        constraints:
+          - node.labels.label == pgb1
+
+  confd2:
+    image: confd
+    networks:
+      - net
+    volumes:
+      - pgb:/etc/pgbouncer/
+    depends_on:
+      - pgb2
+    healthcheck:
+      test: ["CMD", "pg_isready", "-h", "pgb1", "-p", "6432" ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    restart: on-failure
+    deploy:
+      placement:
+        constraints:
+          - node.labels.label == pgb2
+
+networks:
+  net:
+    external: true
+
+volumes:
+  pgb:
+    external: true

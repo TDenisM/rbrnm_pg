@@ -1,0 +1,1 @@
+DATA_SOURCE_NAME=postgresql://root@localhost:5432/pgbench?sslmode=disable

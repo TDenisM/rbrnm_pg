@@ -1,0 +1,351 @@
+- name: Part 1 | ETCD
+  hosts: etcd
+  become: yes
+  vars:
+    ETCD_VER: 'v3.4.14'
+    GOOGLE_URL: 'https://storage.googleapis.com/etcd'
+    GITHUB_URL: 'https://github.com/etcd-io/etcd/releases/download'
+    DOWNLOAD_URL: '{{ GOOGLE_URL }}'
+    # Check the real VMs to find out exect interface with external IP
+    eth: eth1
+  tasks:
+    - name: save interface name for usage in other plays
+      set_fact:
+        eth: "{{ vars['eth'] }}"
+    - name: get ip list
+      set_fact:
+        etcd_nodes_ips: "{{ groups['etcd'] | map('extract', hostvars, ['ansible_'+hostvars['etcd1']['eth'], 'ipv4', 'address']) | list }}"
+    - name: set hosts file
+      template:
+        src: templates/hosts.j2
+        dest: /etc/hosts
+    - name: create group
+      group:
+        name: etcd
+        state: present
+    - name: create user
+      user:
+        name: etcd
+        group: etcd
+        state: present
+    - name: create dir
+      file:
+        path: /task13/etcd
+        state: directory
+        owner: etcd
+        group: etcd
+        recurse: yes
+    - name: create config dir
+      file:
+        path: /etc/etcd
+        state: directory
+        owner: etcd
+        group: etcd
+    - name: copy etcd config
+      template:
+        src: templates/etcd.yml.j2
+        dest: /etc/etcd/etcd.yml
+        owner: etcd
+        group: etcd
+    - name: download
+      get_url:
+        url: '{{ DOWNLOAD_URL }}/{{ ETCD_VER }}/etcd-{{ ETCD_VER }}-linux-amd64.tar.gz'
+        dest: '/task13/etcd-{{ ETCD_VER }}-linux-amd64.tar.gz'
+    - name: uncompress
+      unarchive:
+        src: '/task13/etcd-{{ ETCD_VER }}-linux-amd64.tar.gz'
+        dest: '/task13/etcd'
+        remote_src: yes
+        extra_opts:
+          - --strip-components=1
+    - name: delete file
+      file:
+        path: '/task13/etcd-{{ ETCD_VER }}-linux-amd64.tar.gz'
+        state: absent
+    - name: check etcd ver
+      shell: '/task13/etcd/etcd --version'
+      register: etcd_ver
+    - debug:
+        msg: '{{ etcd_ver }}'
+    - name: check etcdctl ver
+      shell: '/task13/etcd/etcdctl version'
+      register: etcdctl_ver
+    - debug:
+        msg: '{{ etcdctl_ver }}'
+    - name: copy service file
+      copy:
+        src: files/etcd.service
+        dest: /etc/systemd/system/etcd.service
+    - name: link etcd to /usr/bin
+      file:
+        path: /usr/bin/etcd
+        src: /task13/etcd/etcd
+        state: link
+    - name: link etcdctl to /usr/bin
+      file:
+        path: /usr/bin/etcdctl
+        src: /task13/etcd/etcdctl
+        state: link
+    - name: reload systemd
+      shell: systemctl daemon-reload
+    - name: start service
+      service:
+        name: etcd.service
+        state: started
+        enabled: yes
+    - name: add ports to ip list
+      set_fact:
+        etcd_nodes_ips_with_ports: '{{ etcd_nodes_ips | product([":2379"]) | map("join") | list }}'
+    - name: test etcdctl
+      shell: etcdctl --endpoints="{{ etcd_nodes_ips_with_ports | join(',') }}" endpoint status
+      register: test_etcdclt_status
+    - debug:
+        msg: '{{ test_etcdclt_status.stdout }}'
+
+
+- name: Part 2 | PostgreSQL and Patroni
+  hosts: patroni
+  become: yes
+  vars:
+    - pg_ver: 13
+  tasks:
+    - name: get etcd ip list
+      set_fact:
+        etcd_nodes_ips: "{{ groups['etcd'] | map('extract', hostvars, ['ansible_'+hostvars['etcd1']['eth'], 'ipv4', 'address']) | list }}"
+    - name: get patroni ip list
+      set_fact:
+        patroni_nodes_ips: "{{ groups['patroni'] | map('extract', hostvars, ['ansible_'+hostvars['etcd1']['eth'], 'ipv4', 'address']) | list }}"
+    - name: Get pgdg.list file stat
+      stat: path=/etc/apt/sources.list.d/pgdg.list
+      register: p
+    - name: Create file if needed
+      file: path=/etc/apt/sources.list.d/pgdg.list state=touch owner=root group=root mode=0644
+      when: p.stat.exists is defined and not p.stat.exists
+    - name: Create the file repository configuration
+      lineinfile:
+        path: /etc/apt/sources.list.d/pgdg.list
+        line: 'deb http://apt.postgresql.org/pub/repos/apt {{ ansible_distribution_release }}-pgdg main'
+        state: present
+    - name: Import the repository signing key
+      shell: wget --quiet -O - https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo apt-key add -
+    - name: Install packages
+      apt:
+        update_cache: yes
+        name:
+          - postgresql-{{ pg_ver }}
+          - python3-pip
+          - python3-dev
+          - libpq-dev
+          - python-setuptools
+          - python-yaml
+    - name: install pip packages
+      pip:
+        name: 
+          - psycopg2-binary
+          - patroni[etcd]
+    - name: stop pgsql servive
+      service:
+        name: postgresql.service
+        state: stopped
+    - name: create patroni config dir
+      file:
+        path: /etc/patroni
+        state: directory
+        owner: postgres
+        group: postgres
+    - name: get pg bin dir
+      shell: /usr/bin/pg_config --bindir
+      register: pg_bin_dir
+    - name: copy patroni config
+      template:
+        src: templates/patroni.yml.j2
+        dest: /etc/patroni/patroni.yml
+        owner: postgres
+        group: postgres
+        mode: '0600'
+    - name: copy service file
+      copy:
+        src: files/patroni.service
+        dest: /etc/systemd/system/patroni.service
+    - name: init cluster
+      become_user: postgres
+      ignore_errors: yes
+      shell: patronictl -c /etc/patroni/patroni.yml scaffold rebrain-cluster
+    - name: start patroni
+      service:
+        name: patroni.service
+        state: restarted
+    - name: wait for start
+      wait_for:
+        host: '{{ item }}'
+        port: 5432
+      with_items: '{{ patroni_nodes_ips }}'
+    - name: get state
+      become_user: postgres
+      shell: patronictl -c /etc/patroni/patroni.yml list
+      register: patroni_state
+    - debug:
+        msg: '{{ patroni_state.stdout }}'
+
+- name: Part 3 | Data insert and test
+  hosts: localhost
+  vars:
+    - patroni_nodes_ips: []
+  tasks:
+    - name: get patroni names list
+      set_fact:
+        patroni_nodes_names: "{{ groups['patroni'] }}"
+    - name: get patroni ip list
+      set_fact:
+        patroni_nodes_ips: '{{ patroni_nodes_ips + [hostvars[item]["ansible_host"]] }}'
+      with_items: '{{ patroni_nodes_names }}'
+    - name: get cluster state
+      uri:
+        url: 'http://{{ patroni_nodes_ips[0] }}:8008/cluster'
+        body_format: json
+      register: cluster_state
+    - name: get leader
+      set_fact:
+        leader_ip: '{{ cluster_state.json | json_query("members[?role == `leader`].host")}}'
+    - name: get replica
+      set_fact:
+        replica_ip: '{{ cluster_state.json | json_query("members[?role != `leader`].host")}}'
+    - debug:
+        msg: 'LEADER IP: {{ leader_ip[0] }}'
+    - debug:
+        msg: 'REAPLICAS IP: {{ replica_ip }}'
+    - name: create table
+      postgresql_table:
+        login_host: '{{ leader_ip[0] }}'
+        login_user: root
+        login_password: admin
+        db: postgres
+        name: test
+        columns:
+          - id SERIAL Primary Key NOT NULL
+          - info TEXT
+    - name: get table size
+      postgresql_query:
+        login_host: '{{ leader_ip[0] }}'
+        login_user: root
+        login_password: admin
+        db: postgres
+        query: select count(*) from test
+      register: table_size
+    - name: get table size
+      postgresql_query:
+        login_host: '{{ leader_ip[0] }}'
+        login_user: root
+        login_password: admin
+        db: postgres
+        query: INSERT INTO test (info) VALUES ('Hello'),('From'),('Patroni'),('Leader')
+      when: table_size.query_result[0].count == 0
+    - name: get data from replica
+      postgresql_query:
+        login_host: '{{ replica_ip[0] }}'
+        login_user: root
+        login_password: admin
+        db: postgres
+        query: SELECT * FROM test
+      register: replica_result
+    - debug:
+        msg: 'REPLICA REPLY: {{ replica_result.query_result }}'
+
+- name: Part 4 | HAproxy
+  hosts: hap
+  become: yes
+  vars:
+    - patroni_nodes_ips: []
+  tasks:
+    - name: install software-properties-common
+      apt:
+        name: software-properties-common
+        update_cache: yes
+        state: latest
+    - name: install repo
+      apt_repository:
+        repo: ppa:vbernat/haproxy-2.3
+        state: present
+    - name: install haproxy
+      apt:
+        name: haproxy
+        update_cache: yes
+        state: latest
+    - name: add listen section to ha config
+      blockinfile:
+        marker: '# {mark} Listen'
+        path: /etc/haproxy/haproxy.cfg
+        content: '{{ lookup("file", "files/ha_listen") }}'
+    - name: add frontend section to ha config
+      blockinfile:
+        marker: '# {mark} Frontend'
+        path: /etc/haproxy/haproxy.cfg
+        content: '{{ lookup("file", "files/ha_frontend") }}'
+    - name: get patroni names list
+      set_fact:
+        patroni_nodes_names: "{{ groups['patroni'] }}"
+    - name: get patroni ip list
+      set_fact:
+        patroni_nodes_ips: '{{ patroni_nodes_ips + [hostvars[item]["ansible_host"]] }}'
+      with_items: '{{ patroni_nodes_names }}'
+    - name: add backend section to ha config
+      blockinfile:
+        marker: '# {mark} Backend'
+        path: /etc/haproxy/haproxy.cfg
+        content: '{{ lookup("template", "templates/ha_backend.j2") }}'
+    - name: restart hap
+      service:
+        name: haproxy.service
+        state: restarted
+
+- name: Part 5 | Cluster test
+  hosts: pat2
+  become: yes
+  vars:
+    - patroni_nodes_ips: []
+  tasks:
+    - name: get patroni names list
+      set_fact:
+        patroni_nodes_names: "{{ groups['patroni'] }}"
+    - name: get patroni ip list
+      set_fact:
+        patroni_nodes_ips: '{{ patroni_nodes_ips + [hostvars[item]["ansible_host"]] }}'
+      with_items: '{{ patroni_nodes_names }}'
+    - name: get HAproxy ip
+      set_fact:
+        hap_ip: '{{ hostvars["hap"]["ansible_host"] }}'
+    - name: Get patroni leader from hap
+      postgresql_query:
+        login_host: '{{ hap_ip }}'
+        login_user: root
+        login_password: admin
+        db: postgres
+        query: select inet_server_addr()
+      register: leader_ip
+    - name: save leader ip
+      set_fact:
+        leader: '{{ leader_ip.query_result[0].inet_server_addr }}'
+    - debug:
+        msg: 'LEADER IP: {{ leader }}'
+    - name: get leader node name
+      set_fact:
+        leader_name: '{{ hostvars | json_query(query) }}'
+      vars:
+        query: "*.{ip: ansible_host, name: inventory_hostname} | [?ip == '{{ leader }}' ].name "
+    - debug:
+        msg: 'LEADER NODE NAME: {{ leader_name[0] }}'
+
+- name: Part 5.1 | Cluster test | Stop leader
+  hosts: '{{ hostvars["pat2"]["leader_name"] }}'
+  become: yes
+  tasks:
+    - name: stop leader
+      service:
+        name: postgresql.service
+        state: stopped
+    - name: get state
+      become_user: postgres
+      shell: patronictl -c /etc/patroni/patroni.yml list
+      register: patroni_state
+    - debug:
+        msg: '{{ patroni_state.stdout }}'

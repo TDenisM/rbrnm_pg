@@ -1,0 +1,45 @@
+global:
+  scrape_interval: 1s
+
+scrape_configs:
+- job_name: node_exporter
+  dns_sd_configs:
+  - names:
+    - 'tasks.node_exporter'
+    type: 'A'
+    port: 9100
+
+- job_name: pg_exporter1
+  dns_sd_configs:
+  - names:
+    - 'pg_exporter1'
+    type: 'A'
+    port: 9187
+
+- job_name: pg_exporter2
+  dns_sd_configs:
+  - names:
+    - 'pg_exporter2'
+    type: 'A'
+    port: 9187
+
+- job_name: pg_exporter3
+  dns_sd_configs:
+  - names:
+    - 'pg_exporter3'
+    type: 'A'
+    port: 9187
+
+- job_name: pg_exporter4
+  dns_sd_configs:
+  - names:
+    - 'pg_exporter4'
+    type: 'A'
+    port: 9187
+#  - source_labels: [instance]
+#    target_label: __address__
+#    replacement: $1:9100
+#  - source_labels: [__meta_dockerswarm_node_hostname]
+#    target_label: instance
+#    regex: '([^:]+)(:[0-9]+)?'
+#    replacement: '${1}'

@@ -1,0 +1,673 @@
+- name: Task11
+  hosts: s1
+  become: yes
+  vars:
+    - pg_ver: 13
+    - pg_superuser: root
+    - pg_db: task12
+  tasks:
+    - name: Set timezone
+      timezone:
+        name: 'Europe/Moscow'
+    - name: Install repo
+      yum:
+        name:
+          - https://download.postgresql.org/pub/repos/yum/reporpms/EL-7-x86_64/pgdg-redhat-repo-latest.noarch.rpm
+          - https://dl.fedoraproject.org/pub/epel/epel-release-latest-7.noarch.rpm
+        state: latest
+        update_cache: yes
+    - name: Add grafana repo
+      copy:
+        src: grafana.repo
+        dest: /etc/yum.repos.d/
+    - name: Install packages
+      yum:
+        name:
+          - postgresql{{ pg_ver }}-server
+          - python-setuptools
+          - python-pip
+          - firewalld
+          - grafana
+          - pgbouncer
+          - postgresql{{ pg_ver }}-contrib #require for pgbench
+        state: latest
+        update_cache: yes
+    - name: link pgbench
+      command:
+        cmd: ln -s /usr/pgsql-{{ pg_ver }}/bin/pgbench /bin/pgbench
+        creates: /bin/pgbench
+    - name: Check initdb
+      stat:
+        path: /var/lib/pgsql/{{ pg_ver }}/data/pg_hba.conf
+      register: initdb_stat
+    - debug:
+        msg: '{{ initdb_stat }}'
+    - name: Run initdb
+      shell: /usr/bin/postgresql-{{ pg_ver }}-setup initdb
+      when: initdb_stat.stat.exists == false 
+    - name: start grafana
+      service:
+        name: grafana-server.service
+        state: started
+        enabled: yes
+    - name: install psycopg2-binary
+      pip:
+        name: psycopg2-binary
+        executable: pip2
+    - name: trust local connections
+      lineinfile:
+        path: /var/lib/pgsql/{{ pg_ver }}/data/pg_hba.conf
+        regexp: 'host\s+all\s+all\s+127.0.0.1\/32'
+        line: 'host  all  all 127.0.0.1/32 trust'
+    - name: trust socket connections
+      lineinfile:
+        path: /var/lib/pgsql/{{ pg_ver }}/data/pg_hba.conf
+        regexp: 'local\s+all\s+all\s+peer'
+        line: 'local  all  all  trust'
+    - name: restart
+      service:
+        name: postgresql-{{ pg_ver }}.service
+        state: restarted
+        enabled: yes
+    - name: Create SUPER user
+      postgresql_user:
+        login_user: postgres
+        login_host: 127.0.0.1
+        name: '{{ pg_superuser }}'
+        db: postgres
+        priv: ALL
+        state: present
+        role_attr_flags: SUPERUSER
+    - name: Create database
+      postgresql_db:
+        login_user: '{{ pg_superuser }}'
+        login_host: 127.0.0.1
+        name: '{{ pg_db }}'
+        encoding: UTF-8
+        lc_collate: en_US.UTF-8
+        lc_ctype: en_US.UTF-8
+        template: template0
+        owner: root
+    - name: create table
+      postgresql_table:
+        login_user: '{{ pg_superuser }}'
+        login_host: 127.0.0.1
+        db: '{{ pg_db }}'
+        name: pgsql
+        columns:
+          - id int primary key
+          - name text not null
+    - name: check row count
+      postgresql_query:
+        login_user: '{{ pg_superuser }}'
+        login_host: 127.0.0.1
+        db: '{{ pg_db }}'
+        query: select count(*) from pgsql
+      register: row_count
+    - name: fill in table
+      postgresql_query:
+        login_user: '{{ pg_superuser }}'
+        login_host: 127.0.0.1
+        db: '{{ pg_db }}'
+        query: INSERT INTO pgsql SELECT n , md5 (random()::text) FROM generate_series (1, 100000) AS foo(n)
+      when: row_count.query_result[0].count == 0
+    - name: if cost_preview file exists
+      stat:
+        path: /opt/cost_preview.txt
+      register: cost_preview
+    - name: EXPLAIN SELECT * FROM pgsql;
+      postgresql_query:
+        login_user: '{{ pg_superuser }}'
+        login_host: 127.0.0.1
+        db: '{{ pg_db }}'
+        query: EXPLAIN (FORMAT JSON) SELECT * FROM pgsql
+      register: explain
+#      when: cost_preview.stat.exists == false
+    - name: save cost preview
+      lineinfile:
+        path: /opt/cost_preview.txt
+        create: yes
+        line: cost={{ explain.query_result[0]['QUERY PLAN'][0]['Plan']['Startup Cost'] }}..{{ explain.query_result[0]['QUERY PLAN'][0]['Plan']['Total Cost'] }} rows={{ explain.query_result[0]['QUERY PLAN'][0]['Plan']['Plan Rows'] }} width={{ explain.query_result[0]['QUERY PLAN'][0]['Plan']['Plan Width'] }}
+      when: cost_preview.stat.exists == false
+      register: explain_cost
+    - name: analyze
+      postgresql_query:
+        login_user: '{{ pg_superuser }}'
+        login_host: 127.0.0.1
+        db: '{{ pg_db }}'
+        query: analyze pgsql
+#      register: analyze_pgsql
+    - name: explain again
+      postgresql_query:
+        login_user: '{{ pg_superuser }}'
+        login_host: 127.0.0.1
+        db: '{{ pg_db }}'
+        query: EXPLAIN (FORMAT JSON) SELECT * FROM pgsql
+      register: analyze_pgsql
+    - debug:
+        msg: '{{ analyze_pgsql }}'
+    - name: save analyze
+      lineinfile:
+        path: /opt/cost.txt
+        create: yes
+        line: cost={{ analyze_pgsql.query_result[0]['QUERY PLAN'][0]['Plan']['Startup Cost'] }}..{{ analyze_pgsql.query_result[0]['QUERY PLAN'][0]['Plan']['Total Cost'] }} rows={{ analyze_pgsql.query_result[0]['QUERY PLAN'][0]['Plan']['Plan Rows'] }} width={{ analyze_pgsql.query_result[0]['QUERY PLAN'][0]['Plan']['Plan Width'] }}
+    - name: if explain_cost file exists
+      stat:
+        path: /opt/explain_cost.txt
+      register: explain_cost
+    - postgresql_query:
+        login_user: '{{ pg_superuser }}'
+        login_host: 127.0.0.1
+        db: '{{ pg_db }}'
+        query: EXPLAIN (ANALYZE, FORMAT JSON) SELECT * FROM pgsql WHERE id >= 10 and id < 2
+      register: explain
+    - debug:
+        msg: "{{ explain }}"
+    - name: save explain cost
+      lineinfile:
+        path: /opt/explain_cost.txt
+        create: yes
+        line: cost={{ explain.query_result[0]['QUERY PLAN'][0]['Plan']['Startup Cost'] }}..{{ explain.query_result[0]['QUERY PLAN'][0]['Plan']['Total Cost'] }} rows={{ explain.query_result[0]['QUERY PLAN'][0]['Plan']['Plan Rows'] }} width={{ explain.query_result[0]['QUERY PLAN'][0]['Plan']['Plan Width'] }}
+      when: explain_cost.stat.exists == false
+    - name: fault scheduler
+      postgresql_query:
+        login_user: '{{ pg_superuser }}'
+        login_host: 127.0.0.1
+        db: '{{ pg_db }}'
+        query: EXPLAIN SELECT * FROM pgsql WHERE upper(id::text)::int < 20
+      register: fault_sch
+    - debug:
+        msg: '{{ fault_sch }}'
+    - name: save
+      lineinfile:
+        path: /opt/expression.txt
+        line: '{{ fault_sch.query_result }}'
+        create: yes
+    - name: create table success_practice
+      postgresql_table:
+        login_user: '{{ pg_superuser }}'
+        login_host: 127.0.0.1
+        db: '{{ pg_db }}'
+        table: success_practice
+        columns:
+          - id int
+          - description text
+          - pgsql_id int references pgsql(id)
+    - name: if table filled in
+      postgresql_query:
+        login_user: '{{ pg_superuser }}'
+        login_host: 127.0.0.1
+        db: '{{ pg_db }}'
+        query: select count(*) from success_practice
+      register: success_practice
+    - name: fill in table success_practice
+      postgresql_query:
+        login_user: '{{ pg_superuser }}'
+        login_host: 127.0.0.1
+        db: '{{ pg_db }}'
+        query: INSERT INTO success_practice (id, description, pgsql_id) SELECT n, md5(n::text), random()*99999+1 FROM generate_series(1,200000) AS foo(n)
+      when: success_practice.query_result[0].count == 0
+    - name: get success_practice
+      postgresql_query:
+        login_user: '{{ pg_superuser }}'
+        login_host: 127.0.0.1
+        db: '{{ pg_db }}'
+        query: EXPLAIN ANALYZE SELECT * FROM pgsql inner JOIN success_practice on pgsql.id = success_practice.pgsql_id WHERE pgsql_id = 1000
+      register: get_success_practice
+    - name: save get get_success_practice exec time
+      lineinfile:
+        path: /opt/execution_without_index.txt
+        line: "{{ get_success_practice.query_result[-1]['QUERY PLAN'].split(' ')[-2] }}"
+        create: yes
+    - name: create index
+      postgresql_query:
+        login_user: '{{ pg_superuser }}'
+        login_host: 127.0.0.1
+        db: '{{ pg_db }}'
+        query: CREATE index on success_practice (pgsql_id)
+    - name: get success_practice
+      postgresql_query:
+        login_user: '{{ pg_superuser }}'
+        login_host: 127.0.0.1
+        db: '{{ pg_db }}'
+        query: EXPLAIN ANALYZE SELECT * FROM pgsql inner JOIN success_practice on pgsql.id = success_practice.pgsql_id WHERE pgsql_id = 1000
+      register: get_success_practice
+    - name: save get get_success_practice exec time
+      lineinfile:
+        path: /opt/execution_with_index.txt
+        line: "{{ get_success_practice.query_result[-1]['QUERY PLAN'].split(' ')[-2] }}"
+        create: yes
+#
+#    - meta: end_play
+#
+    - name: if archive file exists
+      stat:
+        path: prometheus-2.25.2.linux-amd64.tar.gz
+      register: arc_file
+    - name: download prometheus archive
+      get_url:
+        url: https://github.com/prometheus/prometheus/releases/download/v2.25.2/prometheus-2.25.2.linux-amd64.tar.gz
+        dest: .
+      when: arc_file.stat.exists == false
+    - name: if folder exists
+      stat:
+        path: prometheus-2.25.2.linux-amd64
+      register: arc_folder
+    - name: uncompress
+      unarchive:
+        src: prometheus-2.25.2.linux-amd64.tar.gz
+        dest: .
+        remote_src: yes
+      when: arc_folder.stat.exists == false
+    - name: add OS group
+      group:
+        name: prometheus
+        system: yes
+    - name: add OS user
+      user:
+        name: prometheus
+        group: prometheus
+        create_home: no
+        shell: /bin/false
+    - name: create /etc/prometheus
+      file:
+        path: /etc/prometheus
+        state: directory
+        owner: prometheus
+        group: prometheus
+    - name: create /etc/prometheus subfolders
+      file:
+        path: /etc/prometheus/{{ item }}
+        state: directory
+        owner: prometheus
+        group: prometheus
+      with_items:
+        - rules
+        - rules.d
+        - files_sd
+    - name: create /val/lib/prometheus
+      file:
+        path: /var/lib/prometheus
+        state: directory
+        owner: prometheus
+        group: prometheus
+    - name: is prom bin files moved
+      stat:
+        path: prometheus-2.25.2.linux-amd64/prometheus
+      register: prom_bin_files
+    - name: move prometheus bin files
+      shell: 'mv prometheus-2.25.2.linux-amd64/prometheus /usr/local/bin/'
+      when: prom_bin_files.stat.exists
+    - name: if promtool bin files moved
+      stat:
+        path: prometheus-2.25.2.linux-amd64/promtool
+      register: promtool_bin_files
+    - name: move promtool bin files
+      shell: 'mv prometheus-2.25.2.linux-amd64/promtool /usr/local/bin/'
+      when: promtool_bin_files.stat.exists
+    - name: if console files moved
+      stat:
+        path: prometheus-2.25.2.linux-amd64/console
+      register: console_files
+    - name: move consoles
+      shell: 'mv prometheus-2.25.2.linux-amd64/console /usr/local/bin/'
+      when: console_files.stat.exists
+    - name: if console_libs files moved
+      stat:
+        path: prometheus-2.25.2.linux-amd64/console_libraries
+      register: console_libs_files
+    - name: move console_libraries
+      shell: 'mv prometheus-2.25.2.linux-amd64/console_libraries /etc/prometheus'
+      when: console_libs_files.stat.exists
+    - name: set permissions
+      file:
+        path:
+          - /etc/prometheus/consoles
+          - /etc/prometheus/console_libraries
+        recurse: yes
+        owner: prometheus
+        group: prometheus
+    - name: copy config
+      copy:
+        src: prometheus.yml
+        dest: /etc/prometheus/
+        owner: prometheus
+        group: prometheus
+    - name: create service
+      copy:
+        src: prometheus.service
+        dest: /etc/systemd/system/prometheus.service
+    - name: reload systemd
+      shell: systemctl daemon-reload
+    - name: start prom service
+      service:
+        name: prometheus.service
+        state: started
+        enabled: yes
+    - name: if node exporter archive exists
+      stat:
+        path: node_exporter-1.1.2.linux-amd64.tar.gz
+      register: node_exporter_arc_file
+    - name: donwload node exporter
+      get_url:
+        url: https://github.com/prometheus/node_exporter/releases/download/v1.1.2/node_exporter-1.1.2.linux-amd64.tar.gz
+        dest: .
+      when: node_exporter_arc_file.stat.exists == false
+    - name: if folder exists
+      stat:
+        path: node_exporter-1.1.2.linux-amd64
+      register: node_exporter_arc_folder
+    - name: uncompress
+      unarchive:
+        src: node_exporter-1.1.2.linux-amd64.tar.gz
+        dest: .
+        remote_src: yes
+      when: node_exporter_arc_folder.stat.exists == false
+    - name: add OS group
+      group:
+        name: node_exporter
+        system: yes
+    - name: add OS user
+      user:
+        name: node_exporter
+        group: node_exporter
+        create_home: no
+        shell: /bin/false
+    - name: copy node exporter bin file
+      copy:
+        src: node_exporter-1.1.2.linux-amd64/node_exporter
+        dest: /usr/local/bin/
+        owner: node_exporter
+        group: node_exporter
+        mode: u=+x,g=+x,o=+x
+        remote_src: yes
+    - name: copy service config file
+      copy:
+        src: node_exporter.service
+        dest: /etc/systemd/system/
+    - name: reload systemd 
+      shell: systemctl daemon-reload
+    - name: start node exporter service
+      service:
+        name: node_exporter.service
+        state: started
+        enabled: yes
+    - name: is pg exporter arc file exists
+      stat:
+        path: postgres_exporter-0.9.0.linux-amd64.tar.gz
+      register: pg_expoter_arc_file
+    - name: download postgres exporter
+      get_url:
+        url: https://github.com/prometheus-community/postgres_exporter/releases/download/v0.9.0/postgres_exporter-0.9.0.linux-amd64.tar.gz
+        dest: .
+      when: pg_expoter_arc_file.stat.exists == false
+    - name: if pg exporter folder exists
+      stat:
+        path: postgres_exporter-0.9.0.linux-amd64
+      register: pg_exporter_folder
+    - name: uncompress pg exporter arc file
+      unarchive:
+        src: postgres_exporter-0.9.0.linux-amd64.tar.gz
+        dest: .
+        remote_src: yes
+      when: pg_exporter_folder.stat.exists == false
+    - name: add OS group
+      group:
+        name: postgres_exporter
+        system: yes
+    - name: add OS user
+      user:
+        name: postgres_exporter
+        group: postgres_exporter
+        create_home: no
+        shell: /bin/false
+    - name: copy node exporter bin file
+      copy:
+        src: postgres_exporter-0.9.0.linux-amd64/postgres_exporter
+        dest: /usr/local/bin/
+        owner: postgres_exporter
+        group: postgres_exporter
+        mode: u=+x,g=+x,o=+x
+        remote_src: yes
+    - name: copy pg exporter service file
+      copy:
+        src: postgres_exporter.service
+        dest: /etc/systemd/system/
+        owner: postgres_exporter
+        group: postgres_exporter
+    - name: reload systemd
+      shell: systemctl daemon-reload
+    - name: copy postgres_exporter config file
+      copy:
+        src: postgres_exporter
+        dest: /etc/default/postgres_exporter
+    - name: start pg exporter service
+      service:
+        name: postgres_exporter.service
+        state: restarted
+        enabled: yes
+    - name: if grafana api key exists
+      stat:
+        path: grafana.key
+      register: grafana_key_file
+    - name: acreate api token
+      uri:
+        url: 'http://127.0.0.1:3000/api/auth/keys'
+        method: POST
+        force_basic_auth: yes
+        user: admin
+        password: admin
+        body_format: json
+        body: {"name":"apikeycurl", "role": "Admin"}
+        status_code:
+          - 200
+          - 401
+          - 409
+      register: api_key
+      when: grafana_key_file.stat.exists == false
+    - name: save api key to file
+      copy:
+        content: '{{ api_key.json.key}}'
+        dest: grafana.key
+      when: grafana_key_file.stat.exists == false
+    - name: get grafana api key
+      shell: cat grafana.key
+      register: grafana_key
+    - debug:
+        msg: '{{ grafana_key.stdout_lines[0] }}'
+    - name: set grafana datasource
+      community.grafana.grafana_datasource:
+        name: "postgres"
+        grafana_url: "http://127.0.0.1:3000"
+        grafana_api_key: '{{ grafana_key.stdout_lines[0] }}'
+        ds_type: "postgres"
+        ds_url: "127.0.0.1:5432"
+        database: '{{ pg_db }}'
+        user: '{{ pg_superuser }}'
+        sslmode: "require"
+        is_default: yes
+        additional_json_data:
+          postgresVersion: '{{ pg_ver }}'
+          timescaledb: false
+    - name: set prom datasource
+      community.grafana.grafana_datasource:
+        grafana_url: "http://127.0.0.1:3000"
+        grafana_api_key: '{{ grafana_key.stdout_lines[0] }}'
+        name: "prometheus"
+        ds_type: "prometheus"
+        ds_url: "http://127.0.0.1:9090"
+        access: "proxy"
+        tls_skip_verify: true
+        additional_json_data:
+          httpHeaderName1: "Authorization"
+
+#    - name: Import Grafana dashboard 1860
+#      community.grafana.grafana_dashboard:
+#        grafana_url: http://127.0.0.1:3000
+#        grafana_api_key: "{{ grafana_key.stdout_lines[0] }}"
+#        folder: General
+#        dashboard_id: 1860|int
+
+#    - name: Import Grafana dashboard 9628
+#      community.grafana.grafana_dashboard:
+#        grafana_url: http://127.0.0.1:3000
+#        grafana_api_key: "{{ grafana_key.stdout_lines[0] }}"
+#        folder: General
+#        dashboard_id: 9628|int
+
+#    - name: do init pgbench?
+#      pause:
+#        prompt: y/n?
+#        echo: yes
+#      register: do_init
+
+#    - name: init pgbench and create tables
+#      shell: pgbench -i -h 127.0.0.1 -U {{ pg_superuser }} --scale 100 {{ pg_db }}
+#      when: do_init.user_input == 'y'
+
+#    - name: run pgbench
+#      shell: pgbench -c 50 -j 5 -T 120 -h 127.0.0.1 -U {{ pg_mon_user }} {{ pg_db }}
+
+    - name: pgb config | add db
+      ini_file:
+        path: /etc/pgbouncer/pgbouncer.ini
+        section: databases
+        option: '{{ pg_db }}'
+        value: dbname={{ pg_db }} user={{ pg_superuser }} pool_mode=transaction
+
+    - name: pgb config | max client conn
+      ini_file:
+        path: /etc/pgbouncer/pgbouncer.ini
+        section: pgbouncer
+        option: max_client_conn
+        value: 1000
+    - name: pgb config | def pool size
+      ini_file:
+        path: /etc/pgbouncer/pgbouncer.ini
+        section: pgbouncer
+        option: default_pool_size
+        value: 30
+    - name: pgb config | auth type
+      ini_file:
+        path: /etc/pgbouncer/pgbouncer.ini
+        section: pgbouncer
+        option: auth_type
+        value: md5
+    - name: pgb config | admin user
+      ini_file:
+        path: /etc/pgbouncer/pgbouncer.ini
+        section: pgbouncer
+        option: admin_users
+        value: postgres
+    - set_fact: 
+        joined: '{{ pg_superuser + pg_superuser }}'
+    - debug:
+        msg: '{{ joined }}'
+    - set_fact:
+        hashed: '{{ joined|hash("md5") }}'
+    - debug:
+        msg: '{{ hashed }}'
+    - name: pgb add user
+      lineinfile:
+        path: /etc/pgbouncer/userlist.txt
+        line: '"{{ pg_superuser }}" "md5{{ hashed }}"'
+        create: yes
+    - name: join
+      set_fact:
+        joined: '{{ "postgres" + "postgres" }}'
+    - name: hash
+      set_fact:
+        hashed: '{{ joined|hash("md5") }}'
+    - name: pgb add admin
+      lineinfile:
+        path: /etc/pgbouncer/userlist.txt
+        line: '"postgres" "md5{{ hashed }}"'
+    - name: restart pgbouncer
+      service:
+        name: pgbouncer.service
+        state: restarted
+        enabled: yes
+
+
+#    - name: run default test?
+#      pause:
+#        prompt: y/n (it make sence only on rebrain servers)?
+#        echo: yes
+#      register: do_def_test
+#    - name: run default test
+#      shell: pgbench -U {{ pg_superuser }} -t 1000 -c 15 -f /opt/task11.sql -n {{ pg_db }} > /opt/result_1.txt
+#      when: do_def_test.user_input == 'y'
+#    - name: pg system reset
+#      postgresql_query:
+#        login_user: '{{ pg_superuser }}'
+#        login_host: 127.0.0.1
+#        db: postgres
+#        query: ALTER SYSTEM RESET ALL
+#        autocommit: yes
+#    - name: pg fsync off
+#      postgresql_query:
+#        login_user: '{{ pg_superuser }}'
+#        login_host: 127.0.0.1
+#        db: postgres
+#        query: ALTER SYSTEM SET fsync to off
+#        autocommit: yes
+#    - name: restart pg
+#      service:
+#        name: postgresql-{{ pg_ver }}.service
+#        state: restarted
+#    - name: Do run test (fsync off)?
+#      pause:
+#        prompt: y/n?
+#        echo: yes
+#      register: do_fsync_test
+#    - name: Run test fsync off
+#      shell: pgbench -U {{ pg_superuser }} -t 1000 -c 15 -f /opt/task11.sql -n {{ pg_db }} > /opt/result_2.txt
+#      when: do_fsync_test.user_input == 'y'
+#    - name: system reset
+#      postgresql_query:
+#        login_user: '{{ pg_superuser }}'
+#        login_host: 127.0.0.1
+#        db: postgres
+#        query: ALTER SYSTEM RESET ALL
+#        autocommit: yes
+#    - name: pg synchronous_commit to off
+#      postgresql_query:
+#        login_user: '{{ pg_superuser }}'
+#        login_host: 127.0.0.1
+#        db: postgres
+#        query: ALTER SYSTEM SET synchronous_commit to off
+#        autocommit: yes
+#    - name: pg commit_delay to 100000
+#      postgresql_query:
+#        login_user: '{{ pg_superuser }}'
+#        login_host: 127.0.0.1
+#        db: postgres
+#        query: ALTER SYSTEM SET commit_delay to 100000
+#        autocommit: yes
+#    - name: pg restart
+#      service:
+#        name: postgresql-{{ pg_ver }}.service
+#        state: restarted
+#    - name: Do run test (synchronous_commit commit_delay)?
+#      pause:
+#        prompt: y/n?
+#        echo: yes
+#      register: do_sync_n_commit_test
+#    - name: run test
+#      shell: pgbench -U {{ pg_superuser }} -t 1000 -c 15 -f /opt/task11.sql -n {{ pg_db }} > /opt/result_3.txt
+#      when: do_sync_n_commit_test.user_input == 'y'
+#    - name: Set max_connections
+#      lineinfile:
+#        path: /var/lib/pgsql/{{ pg_ver }}/data/postgresql.conf
+#        regexp: 'max_connections = 100'
+#        line: 'max_connections = 32                   # (change requires restart)'
+#    - name: Set shared_buff
+#      lineinfile:
+#        path: /var/lib/pgsql/{{ pg_ver }}/data/postgresql.conf
+#        regexp: 'shared_buffers = 128MB'
+#        line: 'shared_buffers = 256MB                  # min 128kB'
+#    - name: Set work mem
+#      lineinfile:
+#        path: /var/lib/pgsql/{{ pg_ver }}/data/postgresql.conf
+#        regexp: '#work_mem = 4MB'
+#        line: 'work_mem = 16MB                         # min 64kB'

@@ -1,0 +1,13 @@
+[Unit]
+Description=PostgreSQL Exporter
+After=network.target
+
+[Service]
+User=postgres_exporter
+Group=postgres_exporter
+Type=simple
+ExecStart=/usr/local/bin/postgres_exporter
+EnvironmentFile=/etc/default/postgres_exporter
+
+[Install]
+WantedBy=multi-user.target
